@@ -1,0 +1,10 @@
+/models
+models_v2_one_GPU/
+*.ckpt
+*.pt
+checkpoints/
+output/
+outputs/
+dwpose/__pycache__/
+data/saved_pose/
+*.pyc
