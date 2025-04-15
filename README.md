@@ -4,7 +4,22 @@ An expanded version of [UniAnimate](https://arxiv.org/abs/2406.01188) based on [
 
 UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for consistent human image animation. Wan2.1 is a collection of video synthesis models open-sourced by Alibaba. Our code is based on [DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio), thanks for the nice open-sourced project.
 
+<div align="center">
 
+<p align="center">
+  <img src='https://github.com/user-attachments/assets/b7290f98-8b33-4626-945c-cf287ba84192' width='784'>
+
+  Overview of the proposed UniAnimate-DiT
+</p>
+
+</div>
+
+
+## 🔥 News 
+- **[2025/04/15]** 🔥🔥🔥 We released the training and inference code of UniAnimate-DiT based on [UniAnimate](https://github.com/ali-vilab/UniAnimate) and [Wan2.1](https://github.com/Wan-Video/Wan2.1). The technical report will be avaliable soon.
+
+
+##  Demo cases
 <table>
 <center>
 <tr>
