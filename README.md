@@ -54,10 +54,10 @@ UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for
 <tr>
     <!-- <td width=25% style="border: none"> -->
     <td ><center>
-        <video height="260" controls autoplay loop src="https://github.com/user-attachments/assets/b4bf6e09-1ea0-4917-a85f-07bc22da93da" muted="false"></video>
+        <video height="260" controls autoplay loop src="https://github.com/user-attachments/assets/83ae10c3-9828-4eed-95db-f4e3265924b9" muted="false"></video>
     </td>
     <td ><center>
-        <video height="260" controls autoplay loop src="https://github.com/user-attachments/assets/e6ec8e1b-4187-40b1-9ead-8724b61d23a5" muted="false"></video>
+        <video height="260" controls autoplay loop src="https://github.com/user-attachments/assets/a6838591-4ed1-436e-b016-0c4d3864d92e" muted="false"></video>
     </td>
 </tr>
 </table>
@@ -181,7 +181,7 @@ python run_align_pose.py  --ref_name data/images/taiyi2.jpg --source_video_paths
 The processed target pose for demo videos will be in ```data/saved_pose```. `--ref_name` denotes the path of reference image, `--source_video_paths` provides the source poses, `--saved_pose_dir` means the path of processed target poses.
 
 
-### (4) Run UniAnimate-DiT-14B-I2V to generate 480P videos
+### (4) Run UniAnimate-DiT-14B to generate 480P videos
 
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_480p.py
@@ -194,7 +194,7 @@ For long video generation, run the following comment:
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_long_video_480p.py
 ```
 
-### (5) Run UniAnimate-DiT-14B-I2V to generate 720P videos
+### (5) Run UniAnimate-DiT-14B to generate 720P videos
 
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_720p.py
