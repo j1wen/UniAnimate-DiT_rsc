@@ -16,6 +16,7 @@ UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for
 
 
 ## 🔥 News 
+- **[2025/04/16]** 🔥 The technical report is avaliable on [ArXiv](https://arxiv.org/pdf/2504.11289).
 - **[2025/04/15]** 🔥🔥🔥 We released the training and inference code of UniAnimate-DiT based on [UniAnimate](https://github.com/ali-vilab/UniAnimate) and [Wan2.1](https://github.com/Wan-Video/Wan2.1). The technical report will be avaliable soon.
 
 
