@@ -147,6 +147,12 @@ pip install modelscope
 modelscope download xiaolaowx/UniAnimate-DiT --local_dir ./checkpoints
 ```
 
+Or download UniAnimate-DiT models using huggingface-cli:
+```
+pip install "huggingface_hub[cli]"
+huggingface-cli download ZheWang123/UnAnimate-DiT --local-dir ./checkpoints
+```
+
 (iii) Finally, the model weights will be organized in `./checkpoints/` as follows:
 ```
 ./checkpoints/
