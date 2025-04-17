@@ -197,6 +197,15 @@ About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (h
 
 - Tips: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c2c7019dbb081464271d470d750b7693ade10dd8/examples/unianimate_wan/inference_unianimate_wan_480p.py#L223-L224
 
+- Tips: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
+
+|`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
+|-|-|-|-|-|
+|torch.bfloat16|None (unlimited)|18.2s/it|44G||
+|torch.bfloat16|7*10**9 (7B)|20.5s/it|23G||
+|torch.bfloat16|0|23.0s/it|14G|yes|
+
+
 For long video generation, run the following comment:
 
 ```
