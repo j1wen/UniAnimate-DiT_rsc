@@ -202,8 +202,8 @@ About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (h
 |`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
 |-|-|-|-|-|
 |torch.bfloat16|None (unlimited)|18.2s/it|44G||
-|torch.bfloat16|7*10**9 (7B)|20.5s/it|23G||
-|torch.bfloat16|0|23.0s/it|14G|yes|
+|torch.bfloat16|7*10**9 (7B)|20.5s/it|23G|yes|
+|torch.bfloat16|0|23.0s/it|14G||
 
 
 For long video generation, run the following comment:
