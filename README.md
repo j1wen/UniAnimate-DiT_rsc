@@ -150,7 +150,7 @@ modelscope download xiaolaowx/UniAnimate-DiT --local_dir ./checkpoints
 Or download UniAnimate-DiT models using huggingface-cli:
 ```
 pip install "huggingface_hub[cli]"
-huggingface-cli download ZheWang123/UnAnimate-DiT --local-dir ./checkpoints
+huggingface-cli download ZheWang123/UniAnimate-DiT --local-dir ./checkpoints
 ```
 
 (iii) Finally, the model weights will be organized in `./checkpoints/` as follows:
@@ -193,7 +193,9 @@ The processed target pose for demo videos will be in ```data/saved_pose```. `--r
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_480p.py
 ```
-About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (hight x width) resolution will be generated under the `./outputs` folder:
+About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (hight x width) resolution will be generated under the `./outputs` folder.
+
+- Tips: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c2c7019dbb081464271d470d750b7693ade10dd8/examples/unianimate_wan/inference_unianimate_wan_480p.py#L223-L224
 
 For long video generation, run the following comment:
 
@@ -206,7 +208,7 @@ CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_720p.py
 ```
-About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 resolution will be generated:
+About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 resolution will be generated.
 
 
 Note: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 
