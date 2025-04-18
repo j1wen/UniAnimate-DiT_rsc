@@ -16,7 +16,7 @@ UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for
 
 
 ## 🔥 News 
-- **[2025/04/18]** 🔥🔥🔥 **We support teacache for both short video generation and long video generation, which can achieve about 4 times inference acceleration.** Now, it costs ~3 minutes to generate 5s 480p videos and ~4.5 minutes to generate 5s 720p videos. You can use teacache to select seed and disenable teacache for ideal results.
+- **[2025/04/18]** 🔥🔥🔥 **We support teacache for both short video generation and long video generation, which can achieve about 4 times inference acceleration.** Now, it costs ~3 minutes to generate 5s 480p videos and ~6.5 minutes to generate 5s 720p videos on one A800 GPU. You can use teacache to select seed and disenable teacache for ideal results.
 - **[2025/04/18]** 🔥 We support teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can use teacache to select the seed. Long video generation does not currently support teacache acceleration, but we are working hard to overcome this.
 - **[2025/04/16]** 🔥 The technical report is avaliable on [ArXiv](https://arxiv.org/pdf/2504.11289).
 - **[2025/04/15]** 🔥🔥🔥 We released the training and inference code of UniAnimate-DiT based on [UniAnimate](https://github.com/ali-vilab/UniAnimate) and [Wan2.1](https://github.com/Wan-Video/Wan2.1). The technical report will be avaliable soon.
@@ -237,7 +237,7 @@ About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 r
 Note: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 
 
 
-For long video generation, run the following comment, the tips above can also be used by yourself::
+For long video generation, run the following comment, the tips above can also be used by yourself:
 
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_long_video_720p.py
