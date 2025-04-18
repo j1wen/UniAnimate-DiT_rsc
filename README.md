@@ -16,6 +16,7 @@ UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for
 
 
 ## 🔥 News 
+- **[2025/04/18]** 🔥 We support teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can use teacache to select the seed. Long video generation does not currently support teacache acceleration, but we are working hard to overcome this.
 - **[2025/04/16]** 🔥 The technical report is avaliable on [ArXiv](https://arxiv.org/pdf/2504.11289).
 - **[2025/04/15]** 🔥🔥🔥 We released the training and inference code of UniAnimate-DiT based on [UniAnimate](https://github.com/ali-vilab/UniAnimate) and [Wan2.1](https://github.com/Wan-Video/Wan2.1). The technical report will be avaliable soon.
 
@@ -204,6 +205,8 @@ About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (h
 |torch.bfloat16|7*10**9 (7B)|20.5s/it|23G|yes|
 |torch.bfloat16|0|23.0s/it|14G||
 
+- Tips: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. Long video generation does not currently support teacache acceleration, but we are working hard to overcome this.
+
 
 For long video generation, run the following comment, the tips above can also be used by yourself:
 
@@ -226,6 +229,8 @@ About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 r
 |-|-|-|-|-|
 |torch.bfloat16|7*10**9 (7B)|20.5s/it|36G|yes|
 |torch.bfloat16|0|23.0s/it|26G||
+
+- Tips: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. Long video generation does not currently support teacache acceleration, but we are working hard to overcome this.
 
 
 Note: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 

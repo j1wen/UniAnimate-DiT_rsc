@@ -24,6 +24,7 @@ height = 1280
 width = 720
 seed = 0
 max_frames = 81
+use_teacache = False
 
 test_list_path= [
     # Format: [frame_interval, reference image, driving pose sequence]
@@ -228,6 +229,8 @@ for path_dir_per in test_list_path:
         random_ref_dwpose=random_ref_dwpose_tmp,
         height=height,
         width=width,
+        tea_cache_l1_thresh=0.3 if use_teacache else None,
+        tea_cache_model_id="Wan2.1-I2V-14B-720P" if use_teacache else None,
 
     )
 
