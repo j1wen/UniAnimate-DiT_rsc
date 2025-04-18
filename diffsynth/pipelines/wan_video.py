@@ -1090,7 +1090,11 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
         dwpose_data_list = []
         # from ipdb import set_trace; set_trace()
         first_feature_per_seg = []
+        tea_cache_posi_all = []
+        tea_cache_nega_all = []
         for ii in global_context:
+            tea_cache_posi_all.append({"tea_cache": TeaCache(num_inference_steps, rel_l1_thresh=tea_cache_l1_thresh, model_id=tea_cache_model_id) if tea_cache_l1_thresh is not None else None})
+            tea_cache_nega_all.append({"tea_cache": TeaCache(num_inference_steps, rel_l1_thresh=tea_cache_l1_thresh, model_id=tea_cache_model_id) if tea_cache_l1_thresh is not None else None})
             dwpose_data_per = dwpose_data[:,:,(ii[0][0]*4):(ii[0][-1]*4+1),:,:]
             dwpose_data_list.append(self.dwpose_embedding((torch.cat([dwpose_data_per[:,:,:1].repeat(1,1,3,1,1), dwpose_data_per], dim=2)/255.).to(self.device)).to(torch.bfloat16))
             # first_feature_per_seg.append(latents[:,:,ii[0][0]:(ii[0][0]+1)])
@@ -1119,11 +1123,13 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
 
 
                 # latents = 
+                noise_pred_posi = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi_all[i_index], add_condition = condition)
                 # Inference
-                noise_pred_posi = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi, add_condition = condition)
+                # noise_pred_posi = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi, add_condition = condition)
                 # noise_pred_posi = model_fn_wan_video(self.dit, latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi)
                 if cfg_scale != 1.0:
-                    noise_pred_nega = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input, **tea_cache_nega)
+                    # noise_pred_nega = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input, **tea_cache_nega)
+                    noise_pred_nega = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input, **tea_cache_nega_all[i_index])
                     noise_pred = noise_pred_nega + cfg_scale * (noise_pred_posi - noise_pred_nega)
                 else:
                     noise_pred = noise_pred_posi
@@ -1540,6 +1546,3 @@ class WanRepalceAnyoneVideoPipeline(BasePipeline):
         frames = self.tensor2video(frames[0])
 
         return frames
-
-
-
