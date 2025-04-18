@@ -201,12 +201,11 @@ About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (h
 
 |`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
 |-|-|-|-|-|
-|torch.bfloat16|None (unlimited)|18.2s/it|44G||
 |torch.bfloat16|7*10**9 (7B)|20.5s/it|23G|yes|
 |torch.bfloat16|0|23.0s/it|14G||
 
 
-For long video generation, run the following comment:
+For long video generation, run the following comment, the tips above can also be used by yourself:
 
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_long_video_480p.py
@@ -219,11 +218,20 @@ CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan
 ```
 About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 resolution will be generated.
 
+- Tips: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c37c996740cb9584edbdf3b4db2fa9eb47526e30/examples/unianimate_wan/inference_unianimate_wan_720p.py#L224-L225
+
+- Tips: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
+
+|`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
+|-|-|-|-|-|
+|torch.bfloat16|7*10**9 (7B)|20.5s/it|36G|yes|
+|torch.bfloat16|0|23.0s/it|26G||
+
 
 Note: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 
 
 
-For long video generation, run the following comment:
+For long video generation, run the following comment, the tips above can also be used by yourself::
 
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_long_video_720p.py
