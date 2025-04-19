@@ -269,7 +269,7 @@ data/example_dataset/
       └── frame_data.pkl # packaged frames
 ```
 
-We encourage adding large amounts of data to finetune models to get better results. The experimental results show that about 1000 training videos can finetune a good human image animation model. Some packaged details can also refer to `prepare_training_data.py` file.
+We encourage adding large amounts of data to finetune models to get better results. The experimental results show that about 1000 training videos can finetune a good human image animation model. Please refer to `prepare_training_data.py` file for more details about packaged Dwpose/frames.
 
 ### Step 3: Train
 
