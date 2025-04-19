@@ -22,7 +22,7 @@ sys.path.append("../../")
 # define hight and width
 height = 1280
 width = 720
-seed = 0
+seed = 11
 max_frames = None
 use_teacache = False
 

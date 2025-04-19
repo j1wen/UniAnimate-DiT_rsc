@@ -197,16 +197,16 @@ CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan
 ```
 About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (hight x width) resolution will be generated under the `./outputs` folder.
 
-- Tips: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c2c7019dbb081464271d470d750b7693ade10dd8/examples/unianimate_wan/inference_unianimate_wan_480p.py#L223-L224
+- **Tips**: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c2c7019dbb081464271d470d750b7693ade10dd8/examples/unianimate_wan/inference_unianimate_wan_480p.py#L223-L224
 
-- Tips: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
+- **Tips**: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
 
 |`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
 |-|-|-|-|-|
 |torch.bfloat16|7*10**9 (7B)|20.5s/it|23G|yes|
 |torch.bfloat16|0|23.0s/it|14G||
 
-- Tips: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. 
+- **Tips**: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. 
 
 
 For long video generation, run the following comment, the tips above can also be used by yourself:
@@ -222,19 +222,19 @@ CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan
 ```
 About 36G GPU memory is needed. After this, 81-frame video clips with 1280x720 resolution will be generated.
 
-- Tips: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c37c996740cb9584edbdf3b4db2fa9eb47526e30/examples/unianimate_wan/inference_unianimate_wan_720p.py#L224-L225
+- **Tips**: you can also set `cfg_scale=1.0` to save inference time, which disables classifier-free guidance and can double the speed with minimal performance impact. https://github.com/ali-vilab/UniAnimate-DiT/blob/c37c996740cb9584edbdf3b4db2fa9eb47526e30/examples/unianimate_wan/inference_unianimate_wan_720p.py#L224-L225
 
-- Tips: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
+- **Tips**: you can set `num_persistent_param_in_dit` to a small number to reduce VRAM required.
 
 |`torch_dtype`|`num_persistent_param_in_dit`|Speed|Required VRAM|Default Setting|
 |-|-|-|-|-|
 |torch.bfloat16|7*10**9 (7B)|20.5s/it|36G|yes|
 |torch.bfloat16|0|23.0s/it|26G||
 
-- Tips: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. 
+- **Tips**: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. 
 
 
-Note: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 
+**Note**: Even though our model was trained on 832x480 resolution, we observed that direct inference on 1280x720 is usually allowed and produces satisfactory results. 
 
 
 For long video generation, run the following comment, the tips above can also be used by yourself:
@@ -242,6 +242,8 @@ For long video generation, run the following comment, the tips above can also be
 ```
 CUDA_VISIBLE_DEVICES="0" python examples/unianimate_wan/inference_unianimate_wan_long_video_720p.py
 ```
+
+**Note**: We find use teacache for 720P long video generation may lead to inconsistent background. We still work on it. You can use teacache to select random seed and disenable teacache for ideal results.
 
 ## Train
 
@@ -267,7 +269,7 @@ data/example_dataset/
       └── frame_data.pkl # packaged frames
 ```
 
-We encourage adding large amounts of data to finetune models to get better results. The experimental results show that about 1000 training videos can finetune a good human image animation model.
+We encourage adding large amounts of data to finetune models to get better results. The experimental results show that about 1000 training videos can finetune a good human image animation model. Some packaged details can also refer to `prepare_training_data.py` file.
 
 ### Step 3: Train
 
