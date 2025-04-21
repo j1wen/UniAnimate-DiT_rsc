@@ -1041,7 +1041,7 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
     ):
         # Parameter check
         height, width = self.check_resize_height_width(height, width)
-        # from ipdb import set_trace; set_trace()
+        # 
         if num_frames % 4 != 1:
             num_frames = (num_frames - 1) // 4 * 4 + 1
             print(f"Only `num_frames % 4 != 1` is acceptable. We round it up to {num_frames}.")
@@ -1119,14 +1119,14 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
 
         # Denoise
         self.load_models_to_device(["dit"])
-        # from ipdb import set_trace; set_trace()
+        # 
         self.dwpose_embedding.to(self.device)
         self.randomref_embedding_pose.to(self.device)
         dwpose_data = dwpose_data.unsqueeze(0)
 
         # noise_per = self.generate_noise((1, 16, 21, height//8, width//8), seed=seed, device=rand_device, dtype=torch.float32)
         dwpose_data_list = []
-        # from ipdb import set_trace; set_trace()
+        # 
         first_feature_per_seg = []
         tea_cache_posi_all = []
         tea_cache_nega_all = []
@@ -1135,8 +1135,7 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
             tea_cache_nega_all.append({"tea_cache": TeaCache(num_inference_steps, rel_l1_thresh=tea_cache_l1_thresh, model_id=tea_cache_model_id) if tea_cache_l1_thresh is not None else None})
             dwpose_data_per = dwpose_data[:,:,(ii[0][0]*4):(ii[0][-1]*4+1),:,:]
             dwpose_data_list.append(self.dwpose_embedding((torch.cat([dwpose_data_per[:,:,:1].repeat(1,1,3,1,1), dwpose_data_per], dim=2)/255.).to(self.device)).to(torch.bfloat16))
-            # first_feature_per_seg.append(latents[:,:,ii[0][0]:(ii[0][0]+1)])
-            # first_feature_per_seg.append(torch.randn_like(latents[:,:,ii[0][0]:(ii[0][0]+1)]))
+            # 
             first_feature_per_seg.append(torch.randn_like(latents[:,:,ii[0][0]:(ii[0][0]+2)]))
         
         random_ref_dwpose_data = self.randomref_embedding_pose((random_ref_dwpose.unsqueeze(0)/255.).to(self.device).permute(0,3,1,2)).unsqueeze(2).to(torch.bfloat16) # [1, 20, 104, 60]
@@ -1163,8 +1162,7 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
                 # latents = 
                 noise_pred_posi = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi_all[i_index], add_condition = condition)
                 # Inference
-                # noise_pred_posi = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi, add_condition = condition)
-                # noise_pred_posi = model_fn_wan_video(self.dit, latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi)
+                # 
                 if cfg_scale != 1.0:
                     # noise_pred_nega = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input, **tea_cache_nega)
                     noise_pred_nega = model_fn_wan_video(self.dit, latent_model_input, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input, **tea_cache_nega_all[i_index])
@@ -1174,7 +1172,7 @@ class WanUniAnimateLongVideoPipeline(BasePipeline):
                 
                 # Scheduler
                 noise_pred = self.scheduler.step(noise_pred, self.scheduler.timesteps[progress_id], latent_model_input)
-                # from ipdb import set_trace; set_trace()
+                # 
                 for j, c in enumerate(context):
                     # if not (i_index !=0 and j==0):
                     if i_index ==0 and j==0:
