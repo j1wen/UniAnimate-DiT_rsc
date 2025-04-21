@@ -16,6 +16,7 @@ UniAnimate-DiT is based on a state-of-the-art DiT-based Wan2.1-14B-I2V model for
 
 
 ## 🔥 News 
+- **[2025/04/21]** 🔥 We support Unified Sequence Parallel (USP) for multi-GPUs inference.
 - **[2025/04/18]** 🔥🔥🔥 **We support teacache for both short video generation and long video generation, which can achieve about 4 times inference acceleration.** Now, it costs ~3 minutes to generate 5s 480p videos and ~13 minutes to generate 5s 720p videos on one A800 GPU. You can use teacache to select seed and disenable teacache for ideal results.
 - **[2025/04/18]** 🔥 We support teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can use teacache to select the seed. Long video generation does not currently support teacache acceleration, but we are working hard to overcome this.
 - **[2025/04/16]** 🔥 The technical report is avaliable on [ArXiv](https://arxiv.org/pdf/2504.11289).
@@ -104,6 +105,7 @@ Before using this model, please create the conda environment and install DiffSyn
 
 ```shell
 conda create -n UniAnimate-DiT python=3.9.21
+# or conda create -n UniAnimate-DiT python=3.10.16 # Python>=3.10 is required for Unified Sequence Parallel (USP)
 conda activate UniAnimate-DiT
 
 # CUDA 11.8
@@ -208,6 +210,12 @@ About 23G GPU memory is needed. After this, 81-frame video clips with 832x480 (h
 
 - **Tips**: you can set `use_teacache=True` to enable teacache, which can achieve about 4 times inference acceleration. It may have a slight impact on performance, and you can also use teacache to select the seed. 
 
+If you have many GPUs for inference, we also support Unified Sequence Parallel (USP), note that python>=3.10 is required for Unified Sequence Parallel (USP):
+
+```
+pip install xfuser
+torchrun --standalone --nproc_per_node=4 examples/unianimate_wan/inference_unianimate_wan_480p_usp.py
+```
 
 For long video generation, run the following comment, the tips above can also be used by yourself:
 
