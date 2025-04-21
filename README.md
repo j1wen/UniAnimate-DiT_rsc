@@ -351,7 +351,7 @@ model_manager.load_lora_v2("models/lightning_logs/version_1/checkpoints/epoch=0-
 ...
 ```
 
-Test the LoRA finetuned model trained on multi-GPUs based on Deepspeed, first you need `python zero_to_fp32.py . output_dir/ --safe_serialization` to change the .pt files to .safetensors files, and then run:
+Test the LoRA finetuned model trained on multi-GPUs based on Deepspeed, first you need `python zero_to_fp32.py . output_dir/ --safe_serialization` to change the .pt files to .safetensors files. Note that `zero_to_fp32.py` is an automatically generated file that can be found in the checkpoint folder after training with DeepSpeed on ​​Multi-GPUs. And then run:
 
 ```python
 import torch
