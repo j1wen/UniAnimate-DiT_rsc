@@ -24,13 +24,12 @@ import torch.distributed as dist
 import pickle
 import logging
 from io import BytesIO
-import oss2 as oss
 import os.path as osp
 import multiprocessing as mp
 import sys
 
-import util
-from wholebody import Wholebody
+import dwpose.util as util
+from dwpose.wholebody import Wholebody
 
 
 def get_logger(name="essmc2"):
@@ -209,7 +208,7 @@ def dw_func(_id, file_path, dwpose_model, dwpose_woface_folder='tmp_dwpose_wo_fa
             pickle.dump(pose_frame_all_face,tf)
         
 
-def mp_main(ii, dwpose_model, video_paths, posevideo_dir):
+def mp_main(dwpose_model, video_paths, posevideo_dir):
     
     
     dwpose_model = DWposeDetector()  
@@ -241,5 +240,5 @@ if __name__=='__main__':
     
     dwpose_model = None
 
-    mp_main(tid, dwpose_model, video_list, posevideo_dir)
+    mp_main(dwpose_model, video_list, posevideo_dir)
     
