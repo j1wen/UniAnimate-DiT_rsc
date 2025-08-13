@@ -1,9 +1,15 @@
-from huggingface_hub import hf_hub_download
-from modelscope import snapshot_download
+# from modelscope import snapshot_download
 import os, shutil
-from typing_extensions import Literal, TypeAlias
 from typing import List
-from ..configs.model_config import preset_models_on_huggingface, preset_models_on_modelscope, Preset_model_id
+
+from huggingface_hub import hf_hub_download
+from typing_extensions import Literal, TypeAlias
+
+from ..configs.model_config import (
+    Preset_model_id,
+    preset_models_on_huggingface,
+    preset_models_on_modelscope,
+)
 
 
 def download_from_modelscope(model_id, origin_file_path, local_dir):
@@ -13,7 +19,9 @@ def download_from_modelscope(model_id, origin_file_path, local_dir):
         print(f"    {file_name} has been already in {local_dir}.")
     else:
         print(f"    Start downloading {os.path.join(local_dir, file_name)}")
-        snapshot_download(model_id, allow_file_pattern=origin_file_path, local_dir=local_dir)
+        snapshot_download(
+            model_id, allow_file_pattern=origin_file_path, local_dir=local_dir
+        )
         downloaded_file_path = os.path.join(local_dir, origin_file_path)
         target_file_path = os.path.join(local_dir, os.path.split(origin_file_path)[-1])
         if downloaded_file_path != target_file_path:
@@ -80,7 +88,7 @@ def download_models(
     for model_id in model_id_list:
         for website in downloading_priority:
             if model_id in website_to_preset_models[website]:
-                
+
                 # Parse model metadata
                 model_metadata = website_to_preset_models[website][model_id]
                 if isinstance(model_metadata, list):
@@ -92,20 +100,27 @@ def download_models(
                 model_files = []
                 for model_id, origin_file_path, local_dir in file_data:
                     # Check if the file is downloaded.
-                    file_to_download = os.path.join(local_dir, os.path.basename(origin_file_path))
+                    file_to_download = os.path.join(
+                        local_dir, os.path.basename(origin_file_path)
+                    )
                     if file_to_download in downloaded_files:
                         continue
                     # Download
-                    website_to_download_fn[website](model_id, origin_file_path, local_dir)
+                    website_to_download_fn[website](
+                        model_id, origin_file_path, local_dir
+                    )
                     if os.path.basename(origin_file_path) in os.listdir(local_dir):
                         downloaded_files.append(file_to_download)
                         model_files.append(file_to_download)
-                
+
                 # If the model is successfully downloaded, break.
                 if len(model_files) > 0:
-                    if isinstance(model_metadata, dict) and "load_path" in model_metadata:
+                    if (
+                        isinstance(model_metadata, dict)
+                        and "load_path" in model_metadata
+                    ):
                         model_files = model_metadata["load_path"]
                     load_files.extend(model_files)
                     break
-                
+
     return load_files
