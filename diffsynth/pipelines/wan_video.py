@@ -201,7 +201,6 @@ class WanVideoPipeline(BasePipeline):
         msk = msk.transpose(1, 2)[0]
 
         vae_input = image.transpose(0, 1).repeat(1, num_frames, 1, 1)
-        print(vae_input.shape)
         y = self.vae.encode(
             [vae_input.to(dtype=self.torch_dtype, device=self.device)],
             device=self.device,

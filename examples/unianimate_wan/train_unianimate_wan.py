@@ -556,6 +556,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         use_gradient_checkpointing_offload=False,
         pretrained_lora_path=None,
         model_VAE=None,
+        encode_image_dense=False,
         #
     ):
         super().__init__()
@@ -641,6 +642,8 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         self.learning_rate = learning_rate
         self.use_gradient_checkpointing = use_gradient_checkpointing
         self.use_gradient_checkpointing_offload = use_gradient_checkpointing_offload
+
+        self.encode_image_dense = encode_image_dense
 
     def freeze_parameters(self):
         # Freeze parameters
@@ -789,9 +792,14 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 if "first_frame" in batch:  # [1, 853, 480, 3]
                     first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
                     _, _, num_frames, height, width = video.shape
-                    image_emb = self.pipe_VAE.encode_image(
-                        first_frame, num_frames, height, width
-                    )
+                    if self.encode_image_dense:
+                        image_emb = self.pipe_VAE.encode_image_dense(
+                            first_frame, num_frames, height, width
+                        )
+                    else:
+                        image_emb = self.pipe_VAE.encode_image(
+                            first_frame, num_frames, height, width
+                        )
                 else:
                     image_emb = {}
 
@@ -1110,6 +1118,11 @@ def parse_args():
         default=None,
         help="SwanLab mode (cloud or local).",
     )
+    parser.add_argument(
+        "--encode_image_dense",
+        action="store_true",
+        help="Do not add reference poses",
+    )
     args = parser.parse_args()
     return args
 
@@ -1292,6 +1305,7 @@ def train_onestage(args):
         use_gradient_checkpointing_offload=args.use_gradient_checkpointing_offload,
         pretrained_lora_path=args.pretrained_lora_path,
         model_VAE=model_VAE,
+        encode_image_dense=args.encode_image_dense,
     )
     if args.use_swanlab:
         from swanlab.integration.pytorch_lightning import SwanLabLogger
