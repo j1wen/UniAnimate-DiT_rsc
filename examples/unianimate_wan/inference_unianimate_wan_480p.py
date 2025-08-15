@@ -82,8 +82,11 @@ model_manager.load_models(
 # )
 
 model_manager.load_lora_v2(
-    "/gen_ca/j1wen/UniAnimate-DiT/models_out/epoch=0-step=1200.ckpt/output_dir/pytorch_model.bin",
+    "/gen_ca/j1wen/UniAnimate-DiT/models_out_one_GPU/epoch=0-step=1700.ckpt",
     lora_alpha=1.0,
+)
+print(
+    "/gen_ca/j1wen/UniAnimate-DiT/models_out_tiktok/epoch=0-step=100.ckpt/output_dir/pytorch_model.bin",
 )
 
 # if you use deepspeed to train UniAnimate-Wan2.1, multiple checkpoints may be need to load, use the following form:
@@ -265,10 +268,10 @@ for path_dir_per in test_list_path:
     for ii in range(len(video)):
         ss = video[ii]
         video_out.append(image_compose_width(video_out_condition[ii], ss))
-    os.makedirs("./outputs", exist_ok=True)
+    os.makedirs("/home/j1wen/rsc_unsync/UniAnimate-DiT/outputs", exist_ok=True)
     save_video(
         video_out,
-        "outputs/video_480P_{}_{}.mp4".format(
+        "/home/j1wen/rsc_unsync/UniAnimate-DiT/outputs/video_480P_{}_{}.mp4".format(
             ref_image_path.split("/")[-1], pose_file_path.split("/")[-1]
         ),
         fps=15,

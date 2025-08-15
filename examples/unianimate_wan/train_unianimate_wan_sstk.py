@@ -1,21 +1,17 @@
 import argparse, imageio, os, torch
 import contextlib
 import copy
-
-import datetime
 import glob
-import gzip
 import json
 import pickle
 import random
 import sys
-import time
 from io import BytesIO
 
 import cv2
+
 import numpy as np
 import pandas as pd
-
 import pytorch_lightning as pl
 
 import torch.nn as nn
@@ -42,7 +38,7 @@ from train_util import coco_wholebody2openpose, draw_keypoints
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-TB_FERQ = 1000
+TB_FREQ = 100
 
 
 @contextlib.contextmanager
@@ -62,7 +58,41 @@ def suppress_stderr():
         os.close(saved_stderr_fd)
 
 
+def image_compose_width(imag, imag_1):
+    # read the size of image1
+    rom_image = imag
+    width, height = imag.size
+    # read the size of image2
+    rom_image_1 = imag_1
+
+    width1 = rom_image_1.size[0]
+    # create a new image
+    to_image = Image.new("RGB", (width + width1, height))
+    # paste old images
+    to_image.paste(rom_image, (0, 0))
+    to_image.paste(rom_image_1, (width, 0))
+    return to_image
+
+
 shutterstock_video_dataset = dict(
+    # type="LCAShutterstockVideoTrinityDataset",
+    data_root="/decoders/suzhaoen/legion/lhm/resampled/full_res_images",
+    keypoints_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/keypoints",
+    smplx_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/smplx_params",
+    trinity_root="/decoders/marcopesavento/datasets_new/LCA_trinity/trinity_poses",
+    mask_root="/gen_ca/data/legion/lhm/resampled/derived/alpha_masks_vit",
+    index_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/filter_joint_v5/index",
+    frame_list_root="/decoders/marcopesavento/datasets_new/LCA_trinity/valid_files_corrected_new",
+    # num_source=num_source,
+    # num_target=num_target,
+    # repeat_factor=10,  # 1e5 x 10 = 1e6
+    # black_background=black_background,
+    # face_bbox_aspect_ratio=face_bbox_aspect_ratio,
+    # erode_mask=False,
+)
+
+
+shutterstock_video_dataset_v2 = dict(
     # type="LCAShutterstockVideoTrinityDataset",
     data_root="/decoders/suzhaoen/legion/lhm/resampled/full_res_images",
     keypoints_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/keypoints",
@@ -576,7 +606,6 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
 
         return data_info
 
-    # def __getitem__(self, data_id):
     def __getitem__(self, index):
         index = index % len(self.video_names_valid)
         data = self.get_data_info(index)
@@ -1023,27 +1052,16 @@ class LightningModelForTrain_onestage(pl.LightningModule):
             2
         )  # [1, 20, 104, 60]
 
-        if batch_idx % TB_FERQ == 0:
-            # print(
-            #     batch["dwpose_data"].shape,
-            #     batch["video"].shape,
-            #     batch["random_ref_dwpose_data"].shape,
-            #     batch["first_frame"].shape,
-            #     batch["first_frame"].max(),
-            # )
-            tensorboard = self.logger.experiment
-            input_video_w_pose = (
-                batch["dwpose_data"] / 255.0 * 0.5
-                + ((0.5 * batch["video"]) + 0.5) * 0.5
-            )
-            ref_img_w_pose = (
-                batch["random_ref_dwpose_data"] / 255.0 * 0.5
-                + batch["first_frame"] / 255.0 * 0.5
-            )
-            tensorboard.add_image("inputs/ref_img", ref_img_w_pose[0].permute(2, 0, 1))
-            tensorboard.add_video(
-                "inputs/video", input_video_w_pose.permute(0, 2, 1, 3, 4)
-            )
+        tensorboard = self.logger.experiment
+        input_video_w_pose = (
+            batch["dwpose_data"] / 255.0 * 0.5 + ((0.5 * batch["video"]) + 0.5) * 0.5
+        )
+        ref_img_w_pose = (
+            batch["random_ref_dwpose_data"] / 255.0 * 0.5
+            + batch["first_frame"] / 255.0 * 0.5
+        )
+        tensorboard.add_image("inputs/ref_img", ref_img_w_pose[0].permute(2, 0, 1))
+        tensorboard.add_video("inputs/video", input_video_w_pose.permute(0, 2, 1, 3, 4))
 
         with torch.no_grad():
             if video is not None:
@@ -1056,7 +1074,6 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 latents = self.pipe_VAE.encode_video(video, **self.tiler_kwargs)[0]
                 # image
                 if "first_frame" in batch:  # [1, 853, 480, 3]
-                    # print(batch["first_frame"].shape)
                     first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
                     _, _, num_frames, height, width = video.shape
                     image_emb = self.pipe_VAE.encode_image(
@@ -1130,8 +1147,62 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         loss = loss * self.pipe.scheduler.training_weight(timestep)
 
         # Record log
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, logger=True)
         return loss
+
+    def validation_step(self, batch, batch_idx):
+        # batch["dwpose_data"]/255.: [1, 3, 81, 832, 480], batch["random_ref_dwpose_data"]/255.: [1, 832, 480, 3]
+        text, video, path = batch["text"][0], batch["video"], batch["path"][0]
+        # 'A person is dancing',  [1, 3, 81, 832,
+        first_frame = Image.fromarray(batch["first_frame"][0].detach().cpu().numpy())
+
+        video_out_condition = []
+        for ii in range(batch["dwpose_data"][0].shape[1]):
+            ss = Image.fromarray(
+                batch["dwpose_data"][0, :, ii]
+                .permute(1, 2, 0)
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+            video_out_condition.append(
+                image_compose_width(
+                    first_frame,
+                    ss,
+                )
+            )
+
+        # Image-to-video
+        video = self.pipe(
+            prompt="a person is dancing",
+            negative_prompt="细节模糊不清，字幕，作品，画作，画面，静止，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，杂乱的背景，三条腿，背景人很多，倒着走",
+            input_image=first_frame,
+            num_inference_steps=50,
+            cfg_scale=1.5,  # slow
+            # cfg_scale=1.0, # fast
+            seed=0,
+            tiled=True,
+            dwpose_data=batch["dwpose_data"][0],
+            random_ref_dwpose=batch["random_ref_dwpose_data"][0],
+            height=self.height,
+            width=self.width,
+            tea_cache_l1_thresh=0.3,
+            tea_cache_model_id="Wan2.1-I2V-14B-720P",
+        )
+
+        video_out = []
+        for ii in range(len(video)):
+            ss = video[ii]
+            video_out.append(image_compose_width(video_out_condition[ii], ss))
+        video_out = np.stack([np.array(ss) for ss in video_out], axis=0)
+
+        tensorboard = self.logger.experiment
+        tensorboard.add_video(
+            "validation/output",
+            np.transpose(video_out, (0, 3, 1, 2))[None],
+            global_step=self.global_step,
+        )
 
     def configure_optimizers(self):
         # trainable_modules = filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters())
@@ -1543,13 +1614,10 @@ def train_onestage(args):
         )
         logger = [swanlab_logger]
     else:
-        time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        logger = None
         logger = TensorBoardLogger(
-            "/checkpoint/avatar/j1wen/tensorboard/sync/UniAnimate-DiT", name=time
+            "/checkpoint/avatar/j1wen/tensorboard/sync/UniAnimate-DiT", name="sstk"
         )
-    print("****************start init trainer")
-
-    # print(os.environ)
     trainer = pl.Trainer(
         max_epochs=args.max_epochs,
         accelerator="gpu",
@@ -1572,8 +1640,6 @@ def train_onestage(args):
         logger=logger,
         plugins=[LightningEnvironment()],
     )
-    print("trainer loaded")
-
     trainer.fit(model, dataloader)
 
 
