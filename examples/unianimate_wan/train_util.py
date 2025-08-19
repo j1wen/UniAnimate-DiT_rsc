@@ -337,7 +337,7 @@ def coco_wholebody2openpose(coco_wb_kpts: np.ndarray):
     Return:
         137 x 2/3 converted keypoints in openpose definition
     """
-    openpose_kpts = np.zeros((137, 2), dtype=np.float32)
+    openpose_kpts = np.zeros((137, coco_wb_kpts.shape[-1]), dtype=np.float32)
     for i in range(len(COCO_WHOLEBODY_TO_OPENPOSE_MAPPING)):
         if isinstance(COCO_WHOLEBODY_TO_OPENPOSE_MAPPING[i], list):
             openpose_kpts[i] = (

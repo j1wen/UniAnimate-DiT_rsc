@@ -792,6 +792,28 @@ class WanUniAnimateVideoPipeline(BasePipeline):
         prompt_emb = self.prompter.encode_prompt(prompt, positive=positive)
         return {"context": prompt_emb}
 
+    def encode_image_dense(self, image, num_frames, height, width):
+        image = self.preprocess_image(image.resize((width, height))).to(self.device)
+        clip_context = self.image_encoder.encode_image([image])
+        msk = torch.ones(1, num_frames, height // 8, width // 8, device=self.device)
+        # msk[:, 1:] = 0
+        msk = torch.concat(
+            [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
+        )
+        msk = msk.view(1, msk.shape[1] // 4, 4, height // 8, width // 8)
+        msk = msk.transpose(1, 2)[0]
+
+        vae_input = image.transpose(0, 1).repeat(1, num_frames, 1, 1)
+        y = self.vae.encode(
+            [vae_input.to(dtype=self.torch_dtype, device=self.device)],
+            device=self.device,
+        )[0]
+        y = torch.concat([msk, y])
+        y = y.unsqueeze(0)
+        clip_context = clip_context.to(dtype=self.torch_dtype, device=self.device)
+        y = y.to(dtype=self.torch_dtype, device=self.device)
+        return {"clip_feature": clip_context, "y": y}
+
     def encode_image(self, image, num_frames, height, width):
         image = self.preprocess_image(image.resize((width, height))).to(self.device)
         clip_context = self.image_encoder.encode_image([image])
@@ -996,6 +1018,327 @@ class WanUniAnimateVideoPipeline(BasePipeline):
         )  # [1, 20, 104, 60]
 
         image_emb["y"] = image_emb["y"] + random_ref_dwpose_data
+        condition = rearrange(dwpose_data, "b c f h w -> b (f h w) c").contiguous()
+        for progress_id, timestep in enumerate(
+            progress_bar_cmd(self.scheduler.timesteps)
+        ):
+            timestep = timestep.unsqueeze(0).to(
+                dtype=self.torch_dtype, device=self.device
+            )
+
+            # Inference
+            noise_pred_posi = model_fn_wan_video(
+                self.dit,
+                latents,
+                timestep=timestep,
+                **prompt_emb_posi,
+                **image_emb,
+                **extra_input,
+                **tea_cache_posi,
+                **usp_kwargs,
+                add_condition=condition,
+            )
+            # noise_pred_posi = model_fn_wan_video(self.dit, latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input, **tea_cache_posi)
+            if cfg_scale != 1.0:
+                noise_pred_nega = model_fn_wan_video(
+                    self.dit,
+                    latents,
+                    timestep=timestep,
+                    **prompt_emb_nega,
+                    **image_emb,
+                    **extra_input,
+                    **tea_cache_nega,
+                    **usp_kwargs,
+                )
+                noise_pred = noise_pred_nega + cfg_scale * (
+                    noise_pred_posi - noise_pred_nega
+                )
+            else:
+                noise_pred = noise_pred_posi
+
+            # Scheduler
+            latents = self.scheduler.step(
+                noise_pred, self.scheduler.timesteps[progress_id], latents
+            )
+
+        # Decode
+        self.load_models_to_device(["vae"])
+        frames = self.decode_video(latents, **tiler_kwargs)
+        self.load_models_to_device([])
+        frames = self.tensor2video(frames[0])
+
+        return frames
+
+
+class WanUniAnimateVideoPipeline_v1(WanUniAnimateVideoPipeline):
+    def fetch_models(self, model_manager: ModelManager, disable_ref_pose=False):
+        self.disable_ref_pose = disable_ref_pose
+
+        text_encoder_model_and_path = model_manager.fetch_model(
+            "wan_video_text_encoder", require_model_path=True
+        )
+        if text_encoder_model_and_path is not None:
+            self.text_encoder, tokenizer_path = text_encoder_model_and_path
+            self.prompter.fetch_models(self.text_encoder)
+            self.prompter.fetch_tokenizer(
+                os.path.join(os.path.dirname(tokenizer_path), "google/umt5-xxl")
+            )
+        self.dit = model_manager.fetch_model("wan_video_dit")
+        self.vae = model_manager.fetch_model("wan_video_vae")
+        self.image_encoder = model_manager.fetch_model("wan_video_image_encoder")
+
+        # define the additional modules
+        concat_dim = 4
+        self.dwpose_embedding = nn.Sequential(
+            nn.Conv3d(
+                3, concat_dim * 4, (3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1)
+            ),
+            nn.SiLU(),
+            nn.Conv3d(
+                concat_dim * 4,
+                concat_dim * 4,
+                (3, 3, 3),
+                stride=(1, 1, 1),
+                padding=(1, 1, 1),
+            ),
+            nn.SiLU(),
+            nn.Conv3d(
+                concat_dim * 4,
+                concat_dim * 4,
+                (3, 3, 3),
+                stride=(1, 1, 1),
+                padding=(1, 1, 1),
+            ),
+            nn.SiLU(),
+            nn.Conv3d(
+                concat_dim * 4,
+                concat_dim * 4,
+                (3, 3, 3),
+                stride=(1, 2, 2),
+                padding=(1, 1, 1),
+            ),
+            nn.SiLU(),
+            nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
+            nn.SiLU(),
+            nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
+            nn.SiLU(),
+            nn.Conv3d(concat_dim * 4, 5120, (1, 2, 2), stride=(1, 2, 2), padding=0),
+        )
+
+        if disable_ref_pose:
+            self.randomref_embedding_pose = None
+        else:
+            randomref_dim = 20
+            self.randomref_embedding_pose = nn.Sequential(
+                nn.Conv2d(3, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
+            )
+        # load new weights
+        state_dict_new = {}
+        for key in model_manager.state_dict_new_module:
+            if "dwpose_embedding" in key:
+                state_dict_new[key.split("dwpose_embedding.")[1]] = (
+                    model_manager.state_dict_new_module[key]
+                )
+        self.dwpose_embedding.load_state_dict(state_dict_new, strict=True)
+
+        if not disable_ref_pose:
+            state_dict_new = {}
+            for key in model_manager.state_dict_new_module:
+                if "randomref_embedding_pose" in key:
+                    state_dict_new[key.split("randomref_embedding_pose.")[1]] = (
+                        model_manager.state_dict_new_module[key]
+                    )
+            self.randomref_embedding_pose.load_state_dict(state_dict_new, strict=True)
+        # self.dwpose_embedding.to(self.device)
+        # self.randomref_embedding_pose.to(self.device)
+
+    @staticmethod
+    def from_model_manager(
+        model_manager: ModelManager,
+        disable_ref_pose=False,
+        torch_dtype=None,
+        device=None,
+        use_usp=False,
+    ):
+        if device is None:
+            device = model_manager.device
+        if torch_dtype is None:
+            torch_dtype = model_manager.torch_dtype
+        pipe = WanUniAnimateVideoPipeline_v1(device=device, torch_dtype=torch_dtype)
+        pipe.fetch_models(model_manager, disable_ref_pose=disable_ref_pose)
+
+        if use_usp:
+            from xfuser.core.distributed import get_sequence_parallel_world_size
+
+            from ..distributed.xdit_context_parallel import (
+                usp_attn_forward,
+                usp_dit_forward,
+            )
+
+            for block in pipe.dit.blocks:
+                block.self_attn.forward = types.MethodType(
+                    usp_attn_forward, block.self_attn
+                )
+            pipe.dit.forward = types.MethodType(usp_dit_forward, pipe.dit)
+            pipe.sp_size = get_sequence_parallel_world_size()
+            pipe.use_unified_sequence_parallel = True
+
+        return pipe
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        prompt,
+        negative_prompt="",
+        input_image=None,
+        input_video=None,
+        denoising_strength=1.0,
+        seed=None,
+        rand_device="cpu",
+        height=480,
+        width=832,
+        num_frames=81,
+        cfg_scale=5.0,
+        num_inference_steps=50,
+        sigma_shift=5.0,
+        tiled=True,
+        tile_size=(30, 52),
+        tile_stride=(15, 26),
+        tea_cache_l1_thresh=None,
+        tea_cache_model_id="",
+        progress_bar_cmd=tqdm,
+        progress_bar_st=None,
+        dwpose_data=None,
+        random_ref_dwpose=None,
+    ):
+        # Parameter check
+        height, width = self.check_resize_height_width(height, width)
+        #
+        if num_frames % 4 != 1:
+            num_frames = (num_frames + 2) // 4 * 4 + 1
+            print(
+                f"Only `num_frames % 4 != 1` is acceptable. We round it up to {num_frames}."
+            )
+
+        # Tiler parameters
+        tiler_kwargs = {
+            "tiled": tiled,
+            "tile_size": tile_size,
+            "tile_stride": tile_stride,
+        }
+
+        # Scheduler
+        self.scheduler.set_timesteps(
+            num_inference_steps,
+            denoising_strength=denoising_strength,
+            shift=sigma_shift,
+        )
+
+        # Initialize noise
+        noise = self.generate_noise(
+            (1, 16, (num_frames - 1) // 4 + 1, height // 8, width // 8),
+            seed=seed,
+            device=rand_device,
+            dtype=torch.float32,
+        )
+        noise = noise.to(dtype=self.torch_dtype, device=self.device)
+        if input_video is not None:
+            self.load_models_to_device(["vae"])
+            input_video = self.preprocess_images(input_video)
+            input_video = torch.stack(input_video, dim=2).to(
+                dtype=self.torch_dtype, device=self.device
+            )
+            latents = self.encode_video(input_video, **tiler_kwargs).to(
+                dtype=self.torch_dtype, device=self.device
+            )
+            latents = self.scheduler.add_noise(
+                latents, noise, timestep=self.scheduler.timesteps[0]
+            )
+        else:
+            latents = noise
+
+        # Encode prompts
+        self.load_models_to_device(["text_encoder"])
+        prompt_emb_posi = self.encode_prompt(prompt, positive=True)
+        if cfg_scale != 1.0:
+            prompt_emb_nega = self.encode_prompt(negative_prompt, positive=False)
+
+        # Encode image
+        if input_image is not None and self.image_encoder is not None:
+            self.load_models_to_device(["image_encoder", "vae"])
+            image_emb = self.encode_image(input_image, num_frames, height, width)
+        else:
+            image_emb = {}
+
+        # Extra input
+        extra_input = self.prepare_extra_input(latents)
+
+        # TeaCache
+        tea_cache_posi = {
+            "tea_cache": (
+                TeaCache(
+                    num_inference_steps,
+                    rel_l1_thresh=tea_cache_l1_thresh,
+                    model_id=tea_cache_model_id,
+                )
+                if tea_cache_l1_thresh is not None
+                else None
+            )
+        }
+        tea_cache_nega = {
+            "tea_cache": (
+                TeaCache(
+                    num_inference_steps,
+                    rel_l1_thresh=tea_cache_l1_thresh,
+                    model_id=tea_cache_model_id,
+                )
+                if tea_cache_l1_thresh is not None
+                else None
+            )
+        }
+
+        # Denoise
+        self.load_models_to_device(["dit"])
+
+        # Unified Sequence Parallel
+        usp_kwargs = self.prepare_unified_sequence_parallel()
+
+        # V1 - replace the first frame with the reference frame
+        self.dwpose_embedding.to(self.device)
+        if not self.disable_ref_pose:
+            self.randomref_embedding_pose.to(self.device)
+        dwpose_data[:, 0] = random_ref_dwpose.permute(2, 0, 1)
+        dwpose_data = dwpose_data.unsqueeze(0)
+        dwpose_data = self.dwpose_embedding(
+            (
+                torch.cat(
+                    [dwpose_data[:, :, :1].repeat(1, 1, 3, 1, 1), dwpose_data], dim=2
+                )
+                / 255.0
+            ).to(self.device)
+        ).to(torch.bfloat16)
+        if not self.disable_ref_pose:
+            random_ref_dwpose_data = (
+                self.randomref_embedding_pose(
+                    (random_ref_dwpose.unsqueeze(0) / 255.0)
+                    .to(self.device)
+                    .permute(0, 3, 1, 2)
+                )
+                .unsqueeze(2)
+                .to(torch.bfloat16)
+            )  # [1, 20, 104, 60]
+
+            image_emb["y"] = image_emb["y"] + random_ref_dwpose_data
         condition = rearrange(dwpose_data, "b c f h w -> b (f h w) c").contiguous()
         for progress_id, timestep in enumerate(
             progress_bar_cmd(self.scheduler.timesteps)
