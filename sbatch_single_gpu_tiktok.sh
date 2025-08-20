@@ -1,0 +1,37 @@
+#!/bin/sh
+#SBATCH --partition=learn
+#SBATCH --qos=genca_3drecon
+#SBATCH --time=7-00:00:00
+#SBATCH --job-name=unianimate_tiktok_single_gpu_ver1_ref
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --mem-per-gpu=200G
+#SBATCH --cpus-per-task=32
+#SBATCH --error=/home/%u/logs/uunianimate_tiktok_single_gpu_ver1_ref_job.%J.err
+#SBATCH --output=/home/%u/logs/unianimate_tiktok_single_gpu_ver1_ref_job.%J.out
+
+source /shared/conda_envs/latest-env/bin/activate
+cd /home/$USER/rsc/UniAnimate-DiT/
+export PYTHONPATH=.:$PYTHONPATH
+echo "Start training"
+# python examples/unianimate_wan/train_unianimate_wan.py   --task train     --train_architecture lora    --lora_rank 64 --lora_alpha 64     --dataset_path data/example_dataset      \
+#     --output_path /gen_ca/j1wen/UniAnimate-DiT/models_out_one_GPU_tiktok      \
+#     --dit_path "./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00001-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00002-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00003-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00004-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00005-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00006-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00007-of-00007.safetensors"       \
+#     --text_encoder_path "./Wan2.1-I2V-14B-720P/models_t5_umt5-xxl-enc-bf16.pth"    --vae_path "./Wan2.1-I2V-14B-720P/Wan2.1_VAE.pth"    --max_epochs 10   --learning_rate 1e-4      --accumulate_grad_batches 1      --use_gradient_checkpointing \
+#     --image_encoder_path "./Wan2.1-I2V-14B-720P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"  --use_gradient_checkpointing_offload \
+#     --dataloader_num_workers 16
+
+python examples/unianimate_wan/train_unianimate_wan_ver1_ref.py   --task train     --train_architecture lora    --lora_rank 64 --lora_alpha 64     --dataset_path data/example_dataset      \
+    --output_path /gen_ca/j1wen/UniAnimate-DiT/models_out_tiktok_ver1_ref      \
+    --dit_path "./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00001-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00002-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00003-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00004-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00005-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00006-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00007-of-00007.safetensors"       \
+    --text_encoder_path "./Wan2.1-I2V-14B-720P/models_t5_umt5-xxl-enc-bf16.pth"    --vae_path "./Wan2.1-I2V-14B-720P/Wan2.1_VAE.pth"    --max_epochs 10   --learning_rate 1e-4      --accumulate_grad_batches 1      --use_gradient_checkpointing \
+    --image_encoder_path "./Wan2.1-I2V-14B-720P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"  --use_gradient_checkpointing_offload \
+    --dataloader_num_workers 16
+
+python examples/unianimate_wan/train_unianimate_wan.py   --task train     --train_architecture lora    --lora_rank 64 --lora_alpha 64     --dataset_path data/example_dataset      \
+    --output_path /gen_ca/j1wen/UniAnimate-DiT/models_out_tiktok_imgdense      \
+    --dit_path "./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00001-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00002-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00003-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00004-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00005-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00006-of-00007.safetensors,./Wan2.1-I2V-14B-720P/diffusion_pytorch_model-00007-of-00007.safetensors"       \
+    --text_encoder_path "./Wan2.1-I2V-14B-720P/models_t5_umt5-xxl-enc-bf16.pth"    --vae_path "./Wan2.1-I2V-14B-720P/Wan2.1_VAE.pth"    --max_epochs 10   --learning_rate 1e-4      --accumulate_grad_batches 1      --use_gradient_checkpointing \
+    --image_encoder_path "./Wan2.1-I2V-14B-720P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"  --use_gradient_checkpointing_offload \
+    --dataloader_num_workers 16 --encode_image_dense

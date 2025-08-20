@@ -1,21 +1,17 @@
-import argparse, imageio, os, torch
+import argparse, os, torch
 import contextlib
 import copy
-
 import datetime
 import glob
-import gzip
-import json
 import pickle
 import random
 import sys
-import time
-from io import BytesIO
 
 import cv2
-import numpy as np
-import pandas as pd
 
+import numpy as np
+import pymomentum.geometry as pym_geometry
+import pymomentum.models as pym_models
 import pytorch_lightning as pl
 
 import torch.nn as nn
@@ -29,12 +25,14 @@ from diffsynth import (
     WanVideoPipeline,
 )
 from einops import rearrange
+
+from examples.unianimate_wan.train_util import coco_wholebody2openpose, draw_keypoints
 from peft import inject_adapter_in_model, LoraConfig
-from PIL import Image, ImageFilter
+from PIL import Image
 
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.plugins.environments import LightningEnvironment
-from pytorch_lightning.strategies import SingleDeviceStrategy
+from pytorch_lightning.utilities import rank_zero_only
 from torchvision.transforms import v2
 from tqdm import tqdm
 
@@ -42,7 +40,7 @@ from train_util import coco_wholebody2openpose, draw_keypoints
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-TB_FERQ = 100
+TB_FREQ = 100
 
 
 @contextlib.contextmanager
@@ -60,6 +58,22 @@ def suppress_stderr():
     finally:
         os.dup2(saved_stderr_fd, stderr_fd)
         os.close(saved_stderr_fd)
+
+
+def image_compose_width(imag, imag_1):
+    # read the size of image1
+    rom_image = imag
+    width, height = imag.size
+    # read the size of image2
+    rom_image_1 = imag_1
+
+    width1 = rom_image_1.size[0]
+    # create a new image
+    to_image = Image.new("RGB", (width + width1, height))
+    # paste old images
+    to_image.paste(rom_image, (0, 0))
+    to_image.paste(rom_image_1, (width, 0))
+    return to_image
 
 
 shutterstock_video_dataset = dict(
@@ -83,12 +97,12 @@ shutterstock_video_dataset = dict(
 shutterstock_video_dataset_v2 = dict(
     # type="LCAShutterstockVideoTrinityDataset",
     data_root="/decoders/suzhaoen/legion/lhm/resampled/full_res_images",
-    keypoints_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/keypoints",
-    smplx_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/smplx_params",
-    trinity_root="/decoders/marcopesavento/datasets_new/LCA_trinity/trinity_poses",
-    mask_root="/gen_ca/data/legion/lhm/resampled/derived/alpha_masks_vit",
-    index_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/filter_joint_v5/index",
-    frame_list_root="/decoders/marcopesavento/datasets_new/LCA_trinity/valid_files_corrected_new",
+    keypoints_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    smplx_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/smplx_params",  # not used
+    trinity_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",  # used
+    mask_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    index_root="/home/j1wen/rsc/UniAnimate-DiT/data/example_dataset/SSTK350K/train_scenes.txt",
+    frame_list_root="/xrcia_shared/ariyanzarei/filtering/SSTK_350K/results/sstk_350k/final_filtered_indices/valid_frames",
     # num_source=num_source,
     # num_target=num_target,
     # repeat_factor=10,  # 1e5 x 10 = 1e6
@@ -108,9 +122,9 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         mask_root,
         index_root,
         frame_list_root,
-        max_num_frames=81,
+        max_num_frames=80,
         frame_interval=2,
-        num_frames=81,
+        num_frames=80,
         height=480,
         width=832,
         is_i2v=False,
@@ -148,45 +162,20 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         self.misc_size = [height, width]
         self.video_list = []
 
-        # if "TikTok" in data_list:
+        self.trinity = pym_models.load_default_trinity(
+            model_params_type=pym_models.ModelParams.Compact,
+            model_definition_version=(5, 0),
+        )
+        local_input_path_dir = "DVB665_flipped.glb"
+        [self.char, poses, offsets, fps] = pym_geometry.Character.load_gltf_with_motion(
+            local_input_path_dir
+        )
 
-        #     self.pose_dir = "./data/example_dataset/TikTok/"
-        #     file_list = os.listdir(self.pose_dir)
-        #     print("!!! all dataset length: ", len(file_list))
-        #     #
-        #     for iii_index in file_list:
-        #         self.video_list.append(self.pose_dir + iii_index)
-
-        #     self.use_pose = True
-        #     print("!!! dataset length: ", len(self.video_list))
-
-        # if "UBC_Fashion" in data_list:
-        #     self.pose_dir = "path_of_UBC_Fashion"
-        #     file_list = os.listdir(self.pose_dir)
-        #     print("!!! all dataset length (UBC_Fashion): ", len(file_list))
-
-        #     for iii_index in file_list:
-        #         #
-        #         self.video_list.append(self.pose_dir + iii_index)
-
-        #     self.use_pose = True
-        #     print("!!! dataset length: ", len(self.video_list))
-        # if "self_collected_videos_pose" in data_list:
-
-        #     self.pose_dir = "path_of_your_self_data"
-        #     file_list = os.listdir(self.pose_dir)
-        #     print(
-        #         "!!! all dataset length (self_collected_videos_pose): ", len(file_list)
-        #     )
-        #     #
-        #     for iii_index in file_list:
-
-        #         self.video_list.append(self.pose_dir + iii_index)
-
-        #     self.use_pose = True
-        #     print("!!! dataset length: ", len(self.video_list))
-
-        random.shuffle(self.video_list)
+        trinity_coco_regressor_path = "trinity_v3_S0_full_coco_regressor_compress.npz"
+        with open(trinity_coco_regressor_path, "rb") as f:
+            data = np.load(f)
+            self.trinity_coco_regressor = data["trinity2coco"]
+            self.joint_names = data["joint_names"]
 
         self.frame_process = v2.Compose(
             [
@@ -252,14 +241,6 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
 
         self.video_names_valid = video_names
 
-        with open("invalid_video_names.txt") as f:
-            invalid_paths = [line.split(" ")[0] for line in f.readlines()[:-1]]
-        filtered_video_names = []
-        for video_name in self.video_names_valid:
-            if video_name not in invalid_paths:
-                filtered_video_names.append(video_name)
-        self.video_names_valid = filtered_video_names
-
         return data_list
 
     def resize(self, image):
@@ -307,14 +288,18 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
 
         # Define subdirectories for the video
         image_dir = os.path.join(rgb_dir, video_name_parts)
-        mask_video_dir = os.path.join(mask_dir, video_name_parts)
+        mask_video_dir = os.path.join(
+            mask_dir, video_name_parts, "pre_processing/segmentation"
+        )
         smplx_video_dir = os.path.join(smplx_dir, video_name_parts, "smplx_params")
         if not os.path.exists(smplx_video_dir):
             smplx_video_dir = os.path.join(smplx_dir, video_name_parts)
-        trinity_video_dir = os.path.join(trinity_dir, video_name_parts, "smplx_params")
-        if not os.path.exists(trinity_video_dir):
-            trinity_video_dir = os.path.join(trinity_dir, video_name_parts)
-        pose_video_dir = os.path.join(pose_dir, video_name_parts)
+        trinity_video_dir = os.path.join(
+            trinity_dir, video_name_parts, "ik_refinement/out.pkl"
+        )
+        pose_video_dir = os.path.join(
+            pose_dir, video_name_parts, "pre_processing/out.pkl"
+        )
         frame_list_file = os.path.join(
             frame_list_dir, video_name_parts, f"{video_name}_valid_name_list.txt"
         )
@@ -345,42 +330,70 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
                 missing_path.append(pose_video_dir)
             if not os.path.exists(frame_list_file):
                 missing_path.append(frame_list_file)
-            return video_name, [], 0, "missing path: " + ",".join(missing_path)
+            return video_name, [], 0, [], "missing path: " + ",".join(missing_path)
 
-        # Collect file names (without extensions)
         with open(frame_list_file, "r") as f:
             all_images_file = f.readlines()
-            common_names = [x.strip() for x in all_images_file]
+            valid_common_names = [x.strip() for x in all_images_file]
+
+        # Collect file names (without extensions)
+        common_names = []
+        for file_name in sorted(os.listdir(image_dir)):
+            if file_name.endswith(".jpg") or file_name.endswith(".png"):
+                file_name = file_name.split(".")[0]
+                common_names.append(file_name)
 
         rgb_extension = os.listdir(image_dir)[0].split(".")[-1]
         assert rgb_extension == "jpg" or rgb_extension == "png"
 
         # Build the list of dictionaries for this video
+        poses = pickle.load(open(trinity_video_dir, "rb"))
+
+        valid_video_data_list = []
+        for name in valid_common_names:
+            frame_name = int(name.split("_")[-1])
+            name = f"{video_name}_{frame_name:06d}"
+            data_info = {
+                "rgb_path": os.path.join(image_dir, name + "." + rgb_extension),
+                "mask_path": os.path.join(mask_video_dir, name + ".png"),
+                "pose": poses["pose_params"][name],
+                "K": poses["K"][name],
+                "Rt": poses["Rt"][name],
+            }
+            data_info["video_name"] = video_name
+            valid_video_data_list.append(data_info)
+
         video_data_list = []
         for name in common_names:
             data_info = {
                 "rgb_path": os.path.join(image_dir, name + "." + rgb_extension),
                 "mask_path": os.path.join(mask_video_dir, name + ".png"),
-                "smplx_path": os.path.join(smplx_video_dir, name + ".json"),
+                # "smplx_path": os.path.join(smplx_video_dir, name + ".json"),
                 # "trinity_path": os.path.join(trinity_video_dir, name + ".txt"),
-                "pose_path": os.path.join(pose_video_dir, name + ".json"),
+                "pose": poses["pose_params"][name],
+                "K": poses["K"][name],
+                "Rt": poses["Rt"][name],
             }
-            missing_assets = False
-            for k, v in data_info.items():
-                if not os.path.exists(v):
-                    missing_assets = True
-                    continue
-            if missing_assets:
-                continue
             data_info["video_name"] = video_name
             video_data_list.append(data_info)
 
         # Ensure there are enough samples in this video
         if len(video_data_list) < num_target:
-            # print(f"not enough frame in {video_name}")
-            return video_name, [], 0, "not enough frame: " + str(len(video_data_list))
+            return (
+                video_name,
+                [],
+                0,
+                [],
+                "not enough frame: " + str(len(video_data_list)),
+            )
 
-        return video_name, video_data_list, len(video_data_list), "success"
+        return (
+            video_name,
+            video_data_list,
+            len(video_data_list),
+            valid_video_data_list,
+            "success",
+        )
 
     def get_data_info(self, idx):
         idx = idx % len(self.video_names_valid)  ## repeat_factor
@@ -396,30 +409,27 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
             self.frame_list_dir,
             self.num_target,
         )
-        _, video_data_list, num_valid_data_list, _ = self.process_video(args)
-        if num_valid_data_list == 0:
+        _, video_data_list, num_data_list, valid_video_data_list, _ = (
+            self.process_video(args)
+        )
+        if len(valid_video_data_list) == 0:
             return None
 
-        ## for shape consistency, grab the beta from the first frame
-        video_idxs = [i for i in range(len(video_data_list))]
-        first_idx = video_idxs[0]
-        first_data_info = video_data_list[first_idx]
-        video_shape_params = json.load(open(first_data_info["smplx_path"]))[
-            "betas"
-        ]  ## 10
-
-        source_idxs = random.sample(video_idxs, self.num_source)
+        source_idxs = random.sample(range(len(valid_video_data_list)), self.num_source)
         if self.load_face:
-            source_idxs_face = random.sample(video_idxs, self.num_source)
+            source_idxs_face = random.sample(
+                range(len(valid_video_data_list)), self.num_source
+            )
         source_data_list = []
         for i in range(len(source_idxs)):
             source_idx = source_idxs[i]
-            source_data_info = copy.deepcopy(video_data_list[source_idx])
+            source_data_info = copy.deepcopy(valid_video_data_list[source_idx])
             source_data = self.get_data_info_helper(
-                source_data_info, video_shape_params=video_shape_params, with_face=True
+                source_data_info, video_shape_params=None, with_face=False
             )
 
             if self.load_face:
+                assert False
                 source_idx_face = source_idxs_face[i]
                 source_data_info_face = copy.deepcopy(video_data_list[source_idx_face])
                 source_data_face = self.get_data_info_helper(
@@ -432,6 +442,7 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
                 return None
 
             if self.load_face:
+                assert False
                 face_expr_image = source_data["face_img"]
                 source_data["face_img"] = source_data_face["face_img"]
                 source_data["face_expr_image"] = face_expr_image
@@ -442,7 +453,7 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         # random sample fps
         stride = random.randint(1, self.sample_fps)
 
-        _total_frame_num = len(video_idxs)
+        _total_frame_num = num_data_list
         cover_frame_num = stride * self.max_frames
         max_frames = self.max_frames
         if _total_frame_num < cover_frame_num + 1:
@@ -458,7 +469,7 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         for target_idx in range(start_frame, end_frame, stride):
             target_data_info = copy.deepcopy(video_data_list[target_idx])
             target_data = self.get_data_info_helper(
-                target_data_info, video_shape_params=video_shape_params, with_face=True
+                target_data_info, video_shape_params=None, with_face=True
             )
 
             assert target_data_info["video_name"] == source_video_name
@@ -474,127 +485,58 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
     def get_data_info_helper(
         self, data_info, video_shape_params=None, with_face=False, validate_mask=False
     ):
-        with suppress_stderr():
-            rgb_path = data_info["rgb_path"]
-            img = cv2.imread(data_info["rgb_path"])[
-                :, :, [2, 1, 0]
-            ]  ## bgr image is default
-            mask = cv2.imread(data_info["mask_path"])  # don't need mask
+        img = cv2.imread(data_info["rgb_path"])[
+            :, :, [2, 1, 0]
+        ]  ## bgr image is default
+        mask = cv2.imread(data_info["mask_path"])
 
-        # matte = mask[:, :, 0].astype(np.float32) / 255.0
+        mask = (mask[:, :, 0] > 0).astype(np.uint8) * 255
 
-        # if self.erode_mask:
-        #     kernel = np.ones((3, 3), np.uint8)
-        #     mask = cv2.erode(mask, kernel, iterations=1)
-
-        mask = (mask[:, :, 0] > 128).astype(np.uint8) * 255
-
-        # if self.black_background:
-        #     cond_img = (img * matte[:, :, None] + 255 * (1 - matte[:, :, None])).astype(
-        #         np.uint8
-        #     )
-        # else:
         cond_img = img
 
         # body_pose_params = json.load(open(data_info["smplx_path"]))
 
         ## coco 133 wholebody keypoints, pixel aligned
-        pose = json.load(open(data_info["pose_path"]))
-        assert len(pose["instance_info"]) > 0
-        keypoints = pose["instance_info"][0]["keypoints"]
-        keypoint_scores = pose["instance_info"][0]["keypoint_scores"]
+        pose = torch.tensor(data_info["pose"])
+        skel_states = pym_geometry.model_parameters_to_skeleton_state(
+            self.char, pose[:204]
+        )
 
-        keypoints = (
-            np.array(keypoints).reshape(-1, 2).astype(np.float32)
-        )  ## K x 2; x, y; K = 133
-        keypoint_scores = np.array(keypoint_scores)  ## K
+        # COCO poses
+        joints3d = skel_states[:, :3]
+        skinned_verts = self.trinity.skin_points(skel_states)
+        coco_keypoints3d = torch.from_numpy(self.trinity_coco_regressor).to(
+            torch.float32
+        ) @ torch.cat([joints3d, skinned_verts], dim=0)
+        openpose_keypoints3d = coco_wholebody2openpose(coco_keypoints3d)
 
-        keypoints_openpose = coco_wholebody2openpose(keypoints)
+        openpose_keypoints2d = np.concatenate(
+            [openpose_keypoints3d, np.ones_like(openpose_keypoints3d[:, :1])], axis=-1
+        )
+        openpose_keypoints2d = data_info["Rt"] @ openpose_keypoints2d.T
+        openpose_keypoints2d = (data_info["K"] @ openpose_keypoints2d).T
+        openpose_keypoints2d = openpose_keypoints2d[:, :2] / openpose_keypoints2d[:, 2:]
 
         H, W = img.shape[:2]
-        canvas_without_face, canvas = draw_keypoints(keypoints_openpose, (H, W))
+        canvas_without_face, canvas = draw_keypoints(openpose_keypoints2d, (H, W))
 
         video_name = data_info["video_name"]
 
-        if img is None:  # or mask is None:  # or body_pose_params is None:
+        if img is None:
             return None
-
-        # ## too few valid pixels
-        # if (mask > 0).sum() < 8:
-        #     return None
-
-        # if "expr" not in body_pose_params:
-        #     body_pose_params["expr"] = np.zeros(100)  ## 100
-
-        # image_height, image_width = img.shape[:2]
-        # fallback_indices = np.array([0, 1, 2, 3, 4])
-        # valid_points = keypoints[fallback_indices]
-        # face_bbox = self.get_face_bbox(valid_points, image_height, image_width)
-        # if with_face == True:
-        #     face_img = self.crop_image(cond_img, bbox=face_bbox)
-        # else:
-        #     face_img = None
-
-        # if video_shape_params is not None:
-        #     body_pose_params["betas"] = (
-        #         video_shape_params  ## swap with beta from first frame
-        #     )
-
-        # K = self.get_intrinsics(body_pose_params=body_pose_params)  ## 3 x 3
-        # M = np.eye(4)  ## 4 x 4
-
-        # ##----------------------------------------
-        # ## pad image and mask
-        # target_width, target_height = body_pose_params[
-        #     "img_size_wh"
-        # ]  ## this is 1.2 image size
-        # img, mask, face_bbox, matte, cond_img = self.pad_image_mask(
-        #     img,
-        #     mask,
-        #     target_height,
-        #     target_width,
-        #     face_bbox,
-        #     matte=matte,
-        #     cond_img=cond_img,
-        # )
-        # assert img.shape[:2] == (target_height, target_width)
-        # assert mask.shape[:2] == (target_height, target_width)
-
-        # # trinity pose
-        # with open(data_info["trinity_path"], "r") as f:
-        #     lines = f.readlines()
-        # trinity_pose = np.array([float(x) for x in lines[:204]], dtype=np.float32)
-        # trinity_params = {
-        #     "lbs_motion": trinity_pose[:138],
-        #     "lbs_scale": trinity_pose[138:204],
-        # }
 
         data_info = {
             "img": img,
             "body_img": Image.fromarray(cond_img),
-            # "face_img": face_img,
-            # "face_bbox": face_bbox,
             "img_id": os.path.basename(data_info["rgb_path"]),
             "img_path": data_info["rgb_path"],
             "pose_img": Image.fromarray(canvas_without_face),
             "mask": mask,  # shape: H x W (uint8, with 255 being fg mask, 0 being bg mask, 128 being padded mask)
-            # "matte": matte,  # shape: H x W (float32, with 1 being fg, 0 being bg)
-            # "body_pose_params": trinity_params,
-            # "K": K,
-            # "M": M,
             "video_name": video_name,
         }
-        # data_info["body_img"].save("temp/{}".format(rgb_path.split("/")[-1]))
-        # Image.fromarray(
-        #     (
-        #         np.array(data_info["pose_img"]) * 0.5
-        #         + np.array(data_info["body_img"]) * 0.5
-        #     ).astype(np.uint8)
-        # ).save("temp/{}".format("pose_" + rgb_path.split("/")[-1]))
 
         return data_info
 
-    # def __getitem__(self, data_id):
     def __getitem__(self, index):
         index = index % len(self.video_names_valid)
         data = self.get_data_info(index)
@@ -603,221 +545,199 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         frame_list = []
         dwpose_list = []
         mask_list = []
-        try:
-            clean = True
+        # try:
+        random_ref_frame = data["source_list"][0]["body_img"]
+        if random_ref_frame.mode != "RGB":
+            random_ref_frame = random_ref_frame.convert("RGB")
+        random_ref_dwpose = data["source_list"][0]["pose_img"]
+        random_ref_mask = data["source_list"][0]["mask"]
 
-            random_ref_frame = data["source_list"][0]["body_img"]
-            if random_ref_frame.mode != "RGB":
-                random_ref_frame = random_ref_frame.convert("RGB")
-            random_ref_dwpose = data["source_list"][0]["pose_img"]
-            random_ref_mask = data["source_list"][0]["mask"]
+        first_frame = None
+        for i_index in range(len(data["target_list"])):
+            i_frame = data["target_list"][i_index]["body_img"]
+            if i_frame.mode != "RGB":
+                i_frame = i_frame.convert("RGB")
+            i_dwpose = data["target_list"][i_index]["pose_img"]
+            i_mask = data["target_list"][i_index]["mask"]
 
-            first_frame = None
-            for i_index in range(len(data["target_list"])):
-                i_frame = data["target_list"][i_index]["body_img"]
+            if first_frame is None:
+                first_frame = i_frame
+
+                frame_list.append(i_frame)
+                dwpose_list.append(i_dwpose)
+                mask_list.append(i_mask)
+
+            else:
+                frame_list.append(i_frame)
+                dwpose_list.append(i_dwpose)
+                mask_list.append(i_mask)
+
+        max_frames = self.max_frames
+        if len(data["target_list"]) < max_frames:
+            for _ in range(max_frames - len(data["target_list"])):
+                i_key = len(data["target_list"]) - 1
+
+                i_frame = data["target_list"][i_key]["body_img"]
                 if i_frame.mode != "RGB":
                     i_frame = i_frame.convert("RGB")
-                i_dwpose = data["target_list"][i_index]["pose_img"]
-                i_mask = data["target_list"][i_index]["mask"]
+                i_dwpose = data["target_list"][i_key]["pose_img"]
+                i_mask = data["target_list"][i_key]["mask"]
 
-                if first_frame is None:
-                    first_frame = i_frame
+                frame_list.append(i_frame)
+                dwpose_list.append(i_dwpose)
+                mask_list.append(i_mask)
 
-                    frame_list.append(i_frame)
-                    dwpose_list.append(i_dwpose)
-                    mask_list.append(i_mask)
+        have_frames = len(data["target_list"]) > 0
+        middle_indix = 0
 
-                else:
-                    frame_list.append(i_frame)
-                    dwpose_list.append(i_dwpose)
-                    mask_list.append(i_mask)
+        if have_frames:
 
-            max_frames = self.max_frames
-            if len(data["target_list"]) < max_frames:
-                for _ in range(max_frames - len(data["target_list"])):
-                    i_key = len(data["target_list"]) - 1
+            l_hight = random_ref_frame.size[1]
+            l_width = random_ref_frame.size[0]
 
-                    i_frame = data["target_list"][i_key]["body_img"]
-                    if i_frame.mode != "RGB":
-                        i_frame = i_frame.convert("RGB")
-                    i_dwpose = data["target_list"][i_key]["pose_img"]
-                    i_mask = data["target_list"][i_key]["mask"]
-
-                    frame_list.append(i_frame)
-                    dwpose_list.append(i_dwpose)
-                    mask_list.append(i_mask)
-
-            have_frames = len(data["target_list"]) > 0
-            middle_indix = 0
-
-            if have_frames:
-
-                l_hight = random_ref_frame.size[1]
-                l_width = random_ref_frame.size[0]
-
-                # center crop the reference image to a vertical image
-                target_crop_width = int(self.height / l_hight * l_width)
-                random_center_y, random_center_x = np.median(
-                    np.stack(random_ref_mask.nonzero()), axis=1
+            # center crop the reference image to a vertical image
+            target_crop_width = int(l_hight * self.width / self.height)
+            random_center_y, random_center_x = np.median(
+                np.stack(random_ref_mask.nonzero()), axis=1
+            )
+            if random_center_x < target_crop_width // 2:
+                random_center_x = target_crop_width // 2
+            if random_center_x + target_crop_width // 2 > l_width:
+                random_center_x = l_width - target_crop_width // 2
+            random_ref_frame = random_ref_frame.crop(
+                (
+                    random_center_x - target_crop_width // 2,
+                    0,
+                    random_center_x + target_crop_width // 2,
+                    l_hight,
                 )
-                random_ref_frame = random_ref_frame.crop(
-                    (
-                        random_center_x - target_crop_width // 2,
-                        0,
-                        random_center_x + target_crop_width // 2,
-                        l_hight,
-                    )
+            )
+            random_ref_dwpose = random_ref_dwpose.crop(
+                (
+                    random_center_x - target_crop_width // 2,
+                    0,
+                    random_center_x + target_crop_width // 2,
+                    l_hight,
                 )
-                random_ref_dwpose = random_ref_dwpose.crop(
-                    (
-                        random_center_x - target_crop_width // 2,
-                        0,
-                        random_center_x + target_crop_width // 2,
-                        l_hight,
-                    )
-                )
+            )
 
-                # now center crop the generated video sequence using first frame's mask
+            # now center crop the generated video sequence using first frame's mask
+            if mask_list[0].sum() > 0:
                 center_y, center_x = np.median(np.stack(mask_list[0].nonzero()), axis=1)
-                dwpose_list_new, frame_list_new = [], []
-                for dwpose, frame in zip(dwpose_list, frame_list):
-                    dwpose = dwpose.crop(
-                        (
-                            center_x - target_crop_width // 2,
-                            0,
-                            center_x + target_crop_width // 2,
-                            l_hight,
-                        )
+            else:
+                center_x = l_width // 2
+            dwpose_list_new, frame_list_new = [], []
+            for dwpose, frame in zip(dwpose_list, frame_list):
+                dwpose = dwpose.crop(
+                    (
+                        center_x - target_crop_width // 2,
+                        0,
+                        center_x + target_crop_width // 2,
+                        l_hight,
                     )
-                    frame = frame.crop(
-                        (
-                            center_x - target_crop_width // 2,
-                            0,
-                            center_x + target_crop_width // 2,
-                            l_hight,
-                        )
-                    )
-                    dwpose_list_new.append(dwpose)
-                    frame_list_new.append(frame)
-
-                dwpose_list = dwpose_list_new
-                frame_list = frame_list_new
-
-                # replace with new height and width
-                l_hight = random_ref_frame.size[1]
-                l_width = random_ref_frame.size[0]
-
-                # random crop
-                x1 = random.randint(0, l_width // 14)
-                x2 = random.randint(0, l_width // 14)
-                y1 = random.randint(0, l_hight // 14)
-                y2 = random.randint(0, l_hight // 14)
-
-                random_ref_frame = random_ref_frame.crop(
-                    (x1, y1, l_width - x2, l_hight - y2)
                 )
-                ref_frame = random_ref_frame
-                #
-
-                random_ref_frame_tmp = torch.from_numpy(
-                    np.array(self.resize(random_ref_frame))
-                )
-                random_ref_dwpose_tmp = torch.from_numpy(
-                    np.array(
-                        self.resize(
-                            random_ref_dwpose.crop((x1, y1, l_width - x2, l_hight - y2))
-                        )
+                frame = frame.crop(
+                    (
+                        center_x - target_crop_width // 2,
+                        0,
+                        center_x + target_crop_width // 2,
+                        l_hight,
                     )
-                )  # [3, 512, 320]
+                )
+                dwpose_list_new.append(dwpose)
+                frame_list_new.append(frame)
 
-                video_data_tmp = torch.stack(
-                    [self.frame_process(self.resize(random_ref_frame))]
-                    + [
-                        self.frame_process(
+            dwpose_list = dwpose_list_new
+            frame_list = frame_list_new
+
+            # replace with new height and width
+            l_hight = random_ref_frame.size[1]
+            l_width = random_ref_frame.size[0]
+
+            # random crop
+            x1 = random.randint(0, l_width // 14)
+            x2 = random.randint(0, l_width // 14)
+            y1 = random.randint(0, l_hight // 14)
+            y2 = random.randint(0, l_hight // 14)
+
+            random_ref_frame = random_ref_frame.crop(
+                (x1, y1, l_width - x2, l_hight - y2)
+            )
+            ref_frame = random_ref_frame
+            #
+
+            random_ref_frame_tmp = torch.from_numpy(
+                np.array(self.resize(random_ref_frame))
+            )
+            random_ref_dwpose_tmp = torch.from_numpy(
+                np.array(
+                    self.resize(
+                        random_ref_dwpose.crop((x1, y1, l_width - x2, l_hight - y2))
+                    )
+                )
+            )  # [3, 512, 320]
+
+            video_data_tmp = torch.stack(
+                [self.frame_process(self.resize(random_ref_frame))]
+                + [
+                    self.frame_process(
+                        self.resize(ss.crop((x1, y1, l_width - x2, l_hight - y2)))
+                    )
+                    for ss in frame_list
+                ],
+                dim=0,
+            )  # self.transforms(frames)
+            dwpose_data_tmp = torch.stack(
+                [random_ref_dwpose_tmp.permute(2, 0, 1)]
+                + [
+                    torch.from_numpy(
+                        np.array(
                             self.resize(ss.crop((x1, y1, l_width - x2, l_hight - y2)))
                         )
-                        for ss in frame_list
-                    ],
-                    dim=0,
-                )  # self.transforms(frames)
-                dwpose_data_tmp = torch.stack(
-                    [
-                        torch.from_numpy(
-                            np.array(
-                                self.resize(
-                                    random_ref_dwpose.crop(
-                                        (x1, y1, l_width - x2, l_hight - y2)
-                                    )
-                                )
-                            )
-                        ).permute(2, 0, 1)
-                    ]
-                    + [
-                        torch.from_numpy(
-                            np.array(
-                                self.resize(ss.crop((x1, y1, l_width - x2, l_hight - y2)))
-                            )
-                        ).permute(2, 0, 1)
-                        for ss in dwpose_list
-                    ],
-                    dim=0,
-                )
-
-                # Image.fromarray(random_ref_dwpose_tmp.numpy().astype(np.uint8)).save(
-                #     "temp/ref_pose.png"
-                # )
-                # Image.fromarray(random_ref_frame_tmp.numpy().astype(np.uint8)).save(
-                #     "temp/ref.png"
-                # )
-                # for i, (frame, dwpose) in enumerate(zip(video_data_tmp, dwpose_data_tmp)):
-                #     Image.fromarray(
-                #         ((frame + 0.5) * 0.5 * 255)
-                #         .numpy()
-                #         .astype(np.uint8)
-                #         .transpose(1, 2, 0)
-                #     ).save(f"temp/{i:06d}.png")
-                #     Image.fromarray(
-                #         dwpose.numpy().astype(np.uint8).transpose(1, 2, 0)
-                #     ).save(f"temp/{i:06d}_pose.png")
-
-            video_data = torch.zeros(
-                self.max_frames + 1, 3, self.misc_size[0], self.misc_size[1]
-            )
-            dwpose_data = torch.zeros(
-                self.max_frames + 1, 3, self.misc_size[0], self.misc_size[1]
+                    ).permute(2, 0, 1)
+                    for ss in dwpose_list
+                ],
+                dim=0,
             )
 
-            if have_frames:
-                video_data[: len(frame_list) + 1, ...] = video_data_tmp
+        video_data = torch.zeros(
+            self.max_frames + 1, 3, self.misc_size[0], self.misc_size[1]
+        )
+        dwpose_data = torch.zeros(
+            self.max_frames + 1, 3, self.misc_size[0], self.misc_size[1]
+        )
 
-                dwpose_data[: len(frame_list) + 1, ...] = dwpose_data_tmp
+        if have_frames:
+            video_data[: len(frame_list) + 1, ...] = video_data_tmp
 
-            video_data = video_data.permute(1, 0, 2, 3)
-            dwpose_data = dwpose_data.permute(1, 0, 2, 3)
+            dwpose_data[: len(frame_list) + 1, ...] = dwpose_data_tmp
 
-            caption = "a person is dancing"
-        except Exception as e:
-            #
-            caption = "a person is dancing"
-            #
-            video_data = torch.zeros(
-                3, self.max_frames + 1, self.misc_size[0], self.misc_size[1]
-            )
-            random_ref_frame_tmp = torch.zeros(
-                self.misc_size[0], self.misc_size[1], 3
-            ).int()
-            vit_image = torch.zeros(3, self.misc_size[0], self.misc_size[1])
+        video_data = video_data.permute(1, 0, 2, 3)
+        dwpose_data = dwpose_data.permute(1, 0, 2, 3)
 
-            dwpose_data = torch.zeros(
-                3, self.max_frames + 1, self.misc_size[0], self.misc_size[1]
-            )
-            #
-            random_ref_dwpose_tmp = torch.zeros(self.misc_size[0], self.misc_size[1], 3)
-            print(
-                "{} read video frame failed with error: {}".format(
-                    "".join(self.video_names_valid[index]), e
-                )
-            )
+        caption = "a person is dancing"
+        # except Exception as e:
+        #     #
+        #     caption = "a person is dancing"
+        #     #
+        #     video_data = torch.zeros(
+        #         3, self.max_frames, self.misc_size[0], self.misc_size[1]
+        #     )
+        #     random_ref_frame_tmp = torch.zeros(
+        #         self.misc_size[0], self.misc_size[1], 3
+        #     ).int()
+        #     vit_image = torch.zeros(3, self.misc_size[0], self.misc_size[1])
+
+        #     dwpose_data = torch.zeros(
+        #         3, self.max_frames, self.misc_size[0], self.misc_size[1]
+        #     )
+        #     #
+        #     random_ref_dwpose_tmp = torch.zeros(self.misc_size[0], self.misc_size[1], 3)
+        #     print(
+        #         "{} read video frame failed with error: {}".format(
+        #             "".join(self.video_names_valid[index]), e
+        #         )
+        #     )
 
         text = caption
         path = "".join(self.video_names_valid[index])
@@ -855,6 +775,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         use_gradient_checkpointing_offload=False,
         pretrained_lora_path=None,
         model_VAE=None,
+        add_ref_pose=True,
         #
     ):
         super().__init__()
@@ -908,20 +829,22 @@ class LightningModelForTrain_onestage(pl.LightningModule):
             nn.Conv3d(concat_dim * 4, 5120, (1, 2, 2), stride=(1, 2, 2), padding=0),
         )
 
-        randomref_dim = 20
-        self.randomref_embedding_pose = nn.Sequential(
-            nn.Conv2d(3, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
-        )
+        self.add_ref_pose = add_ref_pose
+        if self.add_ref_pose:
+            randomref_dim = 20
+            self.randomref_embedding_pose = nn.Sequential(
+                nn.Conv2d(3, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
+            )
         self.freeze_parameters()
 
         # self.freeze_parameters()
@@ -948,7 +871,8 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         self.pipe.denoising_model().train()
         self.pipe_VAE.requires_grad_(False)
         self.pipe_VAE.eval()
-        self.randomref_embedding_pose.train()
+        if self.add_ref_pose:
+            self.randomref_embedding_pose.train()
         self.dwpose_embedding.train()
 
     def add_lora_to_model(
@@ -1042,23 +966,18 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 / 255.0
             ).to(self.device)
         )
-        random_ref_dwpose_data = self.randomref_embedding_pose(
-            (batch["random_ref_dwpose_data"] / 255.0)
-            .to(torch.bfloat16)
-            .to(self.device)
-            .permute(0, 3, 1, 2)
-        ).unsqueeze(
-            2
-        )  # [1, 20, 104, 60]
+        if self.add_ref_pose:
+            random_ref_dwpose_data = self.randomref_embedding_pose(
+                (batch["random_ref_dwpose_data"] / 255.0)
+                .to(torch.bfloat16)
+                .to(self.device)
+                .permute(0, 3, 1, 2)
+            ).unsqueeze(
+                2
+            )  # [1, 20, 104, 60]
 
-        if batch_idx % TB_FERQ == 0:
-            # print(
-            #     batch["dwpose_data"].shape,
-            #     batch["video"].shape,
-            #     batch["random_ref_dwpose_data"].shape,
-            #     batch["first_frame"].shape,
-            #     batch["first_frame"].max(),
-            # )
+        @rank_zero_only
+        def log_inputs():
             tensorboard = self.logger.experiment
             input_video_w_pose = (
                 batch["dwpose_data"] / 255.0 * 0.5
@@ -1068,10 +987,18 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 batch["random_ref_dwpose_data"] / 255.0 * 0.5
                 + batch["first_frame"] / 255.0 * 0.5
             )
-            tensorboard.add_image("inputs/ref_img", ref_img_w_pose[0].permute(2, 0, 1))
-            tensorboard.add_video(
-                "inputs/video", input_video_w_pose.permute(0, 2, 1, 3, 4)
+            tensorboard.add_image(
+                "inputs/ref_img",
+                ref_img_w_pose[0].permute(2, 0, 1),
+                global_step=self.global_step,
             )
+            tensorboard.add_video(
+                "inputs/video",
+                input_video_w_pose.permute(0, 2, 1, 3, 4),
+                global_step=self.global_step,
+            )
+
+        log_inputs()
 
         with torch.no_grad():
             if video is not None:
@@ -1084,7 +1011,6 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 latents = self.pipe_VAE.encode_video(video, **self.tiler_kwargs)[0]
                 # image
                 if "first_frame" in batch:  # [1, 853, 480, 3]
-                    # print(batch["first_frame"].shape)
                     first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
                     _, _, num_frames, height, width = video.shape
                     image_emb = self.pipe_VAE.encode_image(
@@ -1105,7 +1031,8 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         if p1 < 0.05:
 
             dwpose_data = torch.zeros_like(dwpose_data)
-            random_ref_dwpose_data = torch.zeros_like(random_ref_dwpose_data)
+            if self.add_ref_pose:
+                random_ref_dwpose_data = torch.zeros_like(random_ref_dwpose_data)
         latents = batch["latents"].to(self.device)  # [1, 16, 21, 60, 104]
         prompt_emb = batch[
             "prompt_emb"
@@ -1125,9 +1052,11 @@ class LightningModelForTrain_onestage(pl.LightningModule):
 
             if p < 0.1:
                 image_emb["y"] = torch.zeros_like(image_emb["y"])
-            image_emb["y"] = (
-                image_emb["y"].to(self.device) + random_ref_dwpose_data
-            )  # [1, 20, 21, 104, 60]
+            # print(self.add_ref_pose, image_emb["y"].shape)
+            if self.add_ref_pose:
+                image_emb["y"] = (
+                    image_emb["y"].to(self.device) + random_ref_dwpose_data
+                )  # [1, 20, 21, 104, 60]
 
         condition = dwpose_data
         #
@@ -1172,8 +1101,11 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 )
             },
             {"params": self.dwpose_embedding.parameters()},
-            {"params": self.randomref_embedding_pose.parameters()},
         ]
+        if self.add_ref_pose:
+            trainable_modules.append(
+                {"params": self.randomref_embedding_pose.parameters()}
+            )
         optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
         return optimizer
 
@@ -1408,6 +1340,11 @@ def parse_args():
         default=None,
         help="SwanLab mode (cloud or local).",
     )
+    parser.add_argument(
+        "--disable_ref_pose",
+        action="store_true",
+        help="Do not add reference poses",
+    )
     args = parser.parse_args()
     return args
 
@@ -1496,7 +1433,7 @@ class LightningModelForDataProcess(pl.LightningModule):
 def train_onestage(args):
 
     dataset = SSTKVideoDataset_onestage(
-        **shutterstock_video_dataset,
+        **shutterstock_video_dataset_v2,
         max_num_frames=args.num_frames,
         frame_interval=1,
         num_frames=args.num_frames,
@@ -1556,6 +1493,7 @@ def train_onestage(args):
         use_gradient_checkpointing_offload=args.use_gradient_checkpointing_offload,
         pretrained_lora_path=args.pretrained_lora_path,
         model_VAE=model_VAE,
+        add_ref_pose=not args.disable_ref_pose,
     )
     if args.use_swanlab:
         from swanlab.integration.pytorch_lightning import SwanLabLogger
@@ -1573,12 +1511,11 @@ def train_onestage(args):
     else:
         time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         print(
-            f"log directory: /checkpoint/avatar/j1wen/tensorboard/sync/UniAnimate-DiT/{time}"
+            f"log directory: /checkpoint/avatar/j1wen/tensorboard/sync/UniAnimate-DiT/sstk_ver1_ref{time}"
         )
         logger = TensorBoardLogger(
             "/checkpoint/avatar/j1wen/tensorboard/sync/UniAnimate-DiT", name=time
         )
-    print("****************start init trainer")
 
     # print(os.environ)
     trainer = pl.Trainer(
