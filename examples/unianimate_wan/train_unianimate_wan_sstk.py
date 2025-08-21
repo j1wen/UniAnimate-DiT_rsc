@@ -36,6 +36,7 @@ from torchvision.transforms import v2
 from tqdm import tqdm
 
 from train_util import coco_wholebody2openpose, draw_keypoints
+from examples.unianimate_dit.train_unianimate_wan import LightningModelForTrain_onestage
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -760,407 +761,407 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         return len(self.video_names_valid)
 
 
-class LightningModelForTrain_onestage(pl.LightningModule):
-    def __init__(
-        self,
-        dit_path,
-        learning_rate=1e-5,
-        lora_rank=4,
-        lora_alpha=4,
-        train_architecture="lora",
-        lora_target_modules="q,k,v,o,ffn.0,ffn.2",
-        init_lora_weights="kaiming",
-        use_gradient_checkpointing=True,
-        use_gradient_checkpointing_offload=False,
-        pretrained_lora_path=None,
-        model_VAE=None,
-        #
-    ):
-        super().__init__()
-        model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
-        if os.path.isfile(dit_path):
-            model_manager.load_models([dit_path])
-        else:
-            dit_path = dit_path.split(",")
-            model_manager.load_models([dit_path])
+# class LightningModelForTrain_onestage(pl.LightningModule):
+#     def __init__(
+#         self,
+#         dit_path,
+#         learning_rate=1e-5,
+#         lora_rank=4,
+#         lora_alpha=4,
+#         train_architecture="lora",
+#         lora_target_modules="q,k,v,o,ffn.0,ffn.2",
+#         init_lora_weights="kaiming",
+#         use_gradient_checkpointing=True,
+#         use_gradient_checkpointing_offload=False,
+#         pretrained_lora_path=None,
+#         model_VAE=None,
+#         #
+#     ):
+#         super().__init__()
+#         model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
+#         if os.path.isfile(dit_path):
+#             model_manager.load_models([dit_path])
+#         else:
+#             dit_path = dit_path.split(",")
+#             model_manager.load_models([dit_path])
 
-        self.pipe = WanVideoPipeline.from_model_manager(model_manager)
-        self.pipe.scheduler.set_timesteps(1000, training=True)
+#         self.pipe = WanVideoPipeline.from_model_manager(model_manager)
+#         self.pipe.scheduler.set_timesteps(1000, training=True)
 
-        self.pipe_VAE = model_VAE.pipe.eval()
-        self.tiler_kwargs = model_VAE.tiler_kwargs
+#         self.pipe_VAE = model_VAE.pipe.eval()
+#         self.tiler_kwargs = model_VAE.tiler_kwargs
 
-        concat_dim = 4
-        self.dwpose_embedding = nn.Sequential(
-            nn.Conv3d(
-                3, concat_dim * 4, (3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1)
-            ),
-            nn.SiLU(),
-            nn.Conv3d(
-                concat_dim * 4,
-                concat_dim * 4,
-                (3, 3, 3),
-                stride=(1, 1, 1),
-                padding=(1, 1, 1),
-            ),
-            nn.SiLU(),
-            nn.Conv3d(
-                concat_dim * 4,
-                concat_dim * 4,
-                (3, 3, 3),
-                stride=(1, 1, 1),
-                padding=(1, 1, 1),
-            ),
-            nn.SiLU(),
-            nn.Conv3d(
-                concat_dim * 4,
-                concat_dim * 4,
-                (3, 3, 3),
-                stride=(1, 2, 2),
-                padding=(1, 1, 1),
-            ),
-            nn.SiLU(),
-            nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
-            nn.SiLU(),
-            nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
-            nn.SiLU(),
-            nn.Conv3d(concat_dim * 4, 5120, (1, 2, 2), stride=(1, 2, 2), padding=0),
-        )
+#         concat_dim = 4
+#         self.dwpose_embedding = nn.Sequential(
+#             nn.Conv3d(
+#                 3, concat_dim * 4, (3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1)
+#             ),
+#             nn.SiLU(),
+#             nn.Conv3d(
+#                 concat_dim * 4,
+#                 concat_dim * 4,
+#                 (3, 3, 3),
+#                 stride=(1, 1, 1),
+#                 padding=(1, 1, 1),
+#             ),
+#             nn.SiLU(),
+#             nn.Conv3d(
+#                 concat_dim * 4,
+#                 concat_dim * 4,
+#                 (3, 3, 3),
+#                 stride=(1, 1, 1),
+#                 padding=(1, 1, 1),
+#             ),
+#             nn.SiLU(),
+#             nn.Conv3d(
+#                 concat_dim * 4,
+#                 concat_dim * 4,
+#                 (3, 3, 3),
+#                 stride=(1, 2, 2),
+#                 padding=(1, 1, 1),
+#             ),
+#             nn.SiLU(),
+#             nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
+#             nn.SiLU(),
+#             nn.Conv3d(concat_dim * 4, concat_dim * 4, 3, stride=(2, 2, 2), padding=1),
+#             nn.SiLU(),
+#             nn.Conv3d(concat_dim * 4, 5120, (1, 2, 2), stride=(1, 2, 2), padding=0),
+#         )
 
-        randomref_dim = 20
-        self.randomref_embedding_pose = nn.Sequential(
-            nn.Conv2d(3, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
-        )
-        self.freeze_parameters()
+#         randomref_dim = 20
+#         self.randomref_embedding_pose = nn.Sequential(
+#             nn.Conv2d(3, concat_dim * 4, 3, stride=1, padding=1),
+#             nn.SiLU(),
+#             nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+#             nn.SiLU(),
+#             nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=1, padding=1),
+#             nn.SiLU(),
+#             nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+#             nn.SiLU(),
+#             nn.Conv2d(concat_dim * 4, concat_dim * 4, 3, stride=2, padding=1),
+#             nn.SiLU(),
+#             nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
+#         )
+#         self.freeze_parameters()
 
-        # self.freeze_parameters()
-        if train_architecture == "lora":
-            self.add_lora_to_model(
-                self.pipe.denoising_model(),
-                lora_rank=lora_rank,
-                lora_alpha=lora_alpha,
-                lora_target_modules=lora_target_modules,
-                init_lora_weights=init_lora_weights,
-                pretrained_lora_path=pretrained_lora_path,
-            )
-        else:
-            self.pipe.denoising_model().requires_grad_(True)
+#         # self.freeze_parameters()
+#         if train_architecture == "lora":
+#             self.add_lora_to_model(
+#                 self.pipe.denoising_model(),
+#                 lora_rank=lora_rank,
+#                 lora_alpha=lora_alpha,
+#                 lora_target_modules=lora_target_modules,
+#                 init_lora_weights=init_lora_weights,
+#                 pretrained_lora_path=pretrained_lora_path,
+#             )
+#         else:
+#             self.pipe.denoising_model().requires_grad_(True)
 
-        self.learning_rate = learning_rate
-        self.use_gradient_checkpointing = use_gradient_checkpointing
-        self.use_gradient_checkpointing_offload = use_gradient_checkpointing_offload
+#         self.learning_rate = learning_rate
+#         self.use_gradient_checkpointing = use_gradient_checkpointing
+#         self.use_gradient_checkpointing_offload = use_gradient_checkpointing_offload
 
-    def freeze_parameters(self):
-        # Freeze parameters
-        self.pipe.requires_grad_(False)
-        self.pipe.eval()
-        self.pipe.denoising_model().train()
-        self.pipe_VAE.requires_grad_(False)
-        self.pipe_VAE.eval()
-        self.randomref_embedding_pose.train()
-        self.dwpose_embedding.train()
+#     def freeze_parameters(self):
+#         # Freeze parameters
+#         self.pipe.requires_grad_(False)
+#         self.pipe.eval()
+#         self.pipe.denoising_model().train()
+#         self.pipe_VAE.requires_grad_(False)
+#         self.pipe_VAE.eval()
+#         self.randomref_embedding_pose.train()
+#         self.dwpose_embedding.train()
 
-    def add_lora_to_model(
-        self,
-        model,
-        lora_rank=4,
-        lora_alpha=4,
-        lora_target_modules="q,k,v,o,ffn.0,ffn.2",
-        init_lora_weights="kaiming",
-        pretrained_lora_path=None,
-        state_dict_converter=None,
-    ):
-        # Add LoRA to UNet
-        self.lora_alpha = lora_alpha
-        if init_lora_weights == "kaiming":
-            init_lora_weights = True
+#     def add_lora_to_model(
+#         self,
+#         model,
+#         lora_rank=4,
+#         lora_alpha=4,
+#         lora_target_modules="q,k,v,o,ffn.0,ffn.2",
+#         init_lora_weights="kaiming",
+#         pretrained_lora_path=None,
+#         state_dict_converter=None,
+#     ):
+#         # Add LoRA to UNet
+#         self.lora_alpha = lora_alpha
+#         if init_lora_weights == "kaiming":
+#             init_lora_weights = True
 
-        lora_config = LoraConfig(
-            r=lora_rank,
-            lora_alpha=lora_alpha,
-            init_lora_weights=init_lora_weights,
-            target_modules=lora_target_modules.split(","),
-        )
-        model = inject_adapter_in_model(lora_config, model)
-        for param in model.parameters():
-            # Upcast LoRA parameters into fp32
-            if param.requires_grad:
-                param.data = param.to(torch.float32)
+#         lora_config = LoraConfig(
+#             r=lora_rank,
+#             lora_alpha=lora_alpha,
+#             init_lora_weights=init_lora_weights,
+#             target_modules=lora_target_modules.split(","),
+#         )
+#         model = inject_adapter_in_model(lora_config, model)
+#         for param in model.parameters():
+#             # Upcast LoRA parameters into fp32
+#             if param.requires_grad:
+#                 param.data = param.to(torch.float32)
 
-        # Lora pretrained lora weights
-        if pretrained_lora_path is not None:
-            #
-            try:
-                state_dict = load_state_dict(pretrained_lora_path)
-            except:
-                state_dict = load_state_dict_from_folder(pretrained_lora_path)
-            #
-            state_dict_new = {}
-            state_dict_new_module = {}
-            for key in state_dict.keys():
+#         # Lora pretrained lora weights
+#         if pretrained_lora_path is not None:
+#             #
+#             try:
+#                 state_dict = load_state_dict(pretrained_lora_path)
+#             except:
+#                 state_dict = load_state_dict_from_folder(pretrained_lora_path)
+#             #
+#             state_dict_new = {}
+#             state_dict_new_module = {}
+#             for key in state_dict.keys():
 
-                if "pipe.dit." in key:
-                    key_new = key.split("pipe.dit.")[1]
-                    state_dict_new[key_new] = state_dict[key]
-                if "dwpose_embedding" in key or "randomref_embedding_pose" in key:
-                    state_dict_new_module[key] = state_dict[key]
-            state_dict = state_dict_new
-            state_dict_new = {}
+#                 if "pipe.dit." in key:
+#                     key_new = key.split("pipe.dit.")[1]
+#                     state_dict_new[key_new] = state_dict[key]
+#                 if "dwpose_embedding" in key or "randomref_embedding_pose" in key:
+#                     state_dict_new_module[key] = state_dict[key]
+#             state_dict = state_dict_new
+#             state_dict_new = {}
 
-            for key in state_dict_new_module:
-                if "dwpose_embedding" in key:
-                    state_dict_new[key.split("dwpose_embedding.")[1]] = (
-                        state_dict_new_module[key]
-                    )
-            self.dwpose_embedding.load_state_dict(state_dict_new, strict=True)
+#             for key in state_dict_new_module:
+#                 if "dwpose_embedding" in key:
+#                     state_dict_new[key.split("dwpose_embedding.")[1]] = (
+#                         state_dict_new_module[key]
+#                     )
+#             self.dwpose_embedding.load_state_dict(state_dict_new, strict=True)
 
-            state_dict_new = {}
-            for key in state_dict_new_module:
-                if "randomref_embedding_pose" in key:
-                    state_dict_new[key.split("randomref_embedding_pose.")[1]] = (
-                        state_dict_new_module[key]
-                    )
-            self.randomref_embedding_pose.load_state_dict(state_dict_new, strict=True)
+#             state_dict_new = {}
+#             for key in state_dict_new_module:
+#                 if "randomref_embedding_pose" in key:
+#                     state_dict_new[key.split("randomref_embedding_pose.")[1]] = (
+#                         state_dict_new_module[key]
+#                     )
+#             self.randomref_embedding_pose.load_state_dict(state_dict_new, strict=True)
 
-            if state_dict_converter is not None:
-                state_dict = state_dict_converter(state_dict)
-            missing_keys, unexpected_keys = model.load_state_dict(
-                state_dict, strict=False
-            )
-            all_keys = [i for i, _ in model.named_parameters()]
-            num_updated_keys = len(all_keys) - len(missing_keys)
-            num_unexpected_keys = len(unexpected_keys)
-            print(
-                f"{num_updated_keys} parameters are loaded from {pretrained_lora_path}. {num_unexpected_keys} parameters are unexpected."
-            )
+#             if state_dict_converter is not None:
+#                 state_dict = state_dict_converter(state_dict)
+#             missing_keys, unexpected_keys = model.load_state_dict(
+#                 state_dict, strict=False
+#             )
+#             all_keys = [i for i, _ in model.named_parameters()]
+#             num_updated_keys = len(all_keys) - len(missing_keys)
+#             num_unexpected_keys = len(unexpected_keys)
+#             print(
+#                 f"{num_updated_keys} parameters are loaded from {pretrained_lora_path}. {num_unexpected_keys} parameters are unexpected."
+#             )
 
-    def training_step(self, batch, batch_idx):
-        # batch["dwpose_data"]/255.: [1, 3, 81, 832, 480], batch["random_ref_dwpose_data"]/255.: [1, 832, 480, 3]
-        text, video, path = batch["text"][0], batch["video"], batch["path"][0]
-        # 'A person is dancing',  [1, 3, 81, 832, 480], 'data/example_dataset/train/[DLPanda.com][]7309800480371133711.mp4'
-        self.pipe_VAE.device = self.device
-        dwpose_data = self.dwpose_embedding(
-            (
-                torch.cat(
-                    [
-                        batch["dwpose_data"][:, :, :1].repeat(1, 1, 3, 1, 1),
-                        batch["dwpose_data"],
-                    ],
-                    dim=2,
-                )
-                / 255.0
-            ).to(self.device)
-        )
-        random_ref_dwpose_data = self.randomref_embedding_pose(
-            (batch["random_ref_dwpose_data"] / 255.0)
-            .to(torch.bfloat16)
-            .to(self.device)
-            .permute(0, 3, 1, 2)
-        ).unsqueeze(
-            2
-        )  # [1, 20, 104, 60]
+#     def training_step(self, batch, batch_idx):
+#         # batch["dwpose_data"]/255.: [1, 3, 81, 832, 480], batch["random_ref_dwpose_data"]/255.: [1, 832, 480, 3]
+#         text, video, path = batch["text"][0], batch["video"], batch["path"][0]
+#         # 'A person is dancing',  [1, 3, 81, 832, 480], 'data/example_dataset/train/[DLPanda.com][]7309800480371133711.mp4'
+#         self.pipe_VAE.device = self.device
+#         dwpose_data = self.dwpose_embedding(
+#             (
+#                 torch.cat(
+#                     [
+#                         batch["dwpose_data"][:, :, :1].repeat(1, 1, 3, 1, 1),
+#                         batch["dwpose_data"],
+#                     ],
+#                     dim=2,
+#                 )
+#                 / 255.0
+#             ).to(self.device)
+#         )
+#         random_ref_dwpose_data = self.randomref_embedding_pose(
+#             (batch["random_ref_dwpose_data"] / 255.0)
+#             .to(torch.bfloat16)
+#             .to(self.device)
+#             .permute(0, 3, 1, 2)
+#         ).unsqueeze(
+#             2
+#         )  # [1, 20, 104, 60]
 
-        tensorboard = self.logger.experiment
-        input_video_w_pose = (
-            batch["dwpose_data"] / 255.0 * 0.5 + ((0.5 * batch["video"]) + 0.5) * 0.5
-        )
-        ref_img_w_pose = (
-            batch["random_ref_dwpose_data"] / 255.0 * 0.5
-            + batch["first_frame"] / 255.0 * 0.5
-        )
-        tensorboard.add_image("inputs/ref_img", ref_img_w_pose[0].permute(2, 0, 1))
-        tensorboard.add_video("inputs/video", input_video_w_pose.permute(0, 2, 1, 3, 4))
+#         tensorboard = self.logger.experiment
+#         input_video_w_pose = (
+#             batch["dwpose_data"] / 255.0 * 0.5 + ((0.5 * batch["video"]) + 0.5) * 0.5
+#         )
+#         ref_img_w_pose = (
+#             batch["random_ref_dwpose_data"] / 255.0 * 0.5
+#             + batch["first_frame"] / 255.0 * 0.5
+#         )
+#         tensorboard.add_image("inputs/ref_img", ref_img_w_pose[0].permute(2, 0, 1))
+#         tensorboard.add_video("inputs/video", input_video_w_pose.permute(0, 2, 1, 3, 4))
 
-        with torch.no_grad():
-            if video is not None:
-                # prompt
-                prompt_emb = self.pipe_VAE.encode_prompt(text)
-                # video
-                video = video.to(
-                    dtype=self.pipe_VAE.torch_dtype, device=self.pipe_VAE.device
-                )
-                latents = self.pipe_VAE.encode_video(video, **self.tiler_kwargs)[0]
-                # image
-                if "first_frame" in batch:  # [1, 853, 480, 3]
-                    first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
-                    _, _, num_frames, height, width = video.shape
-                    image_emb = self.pipe_VAE.encode_image(
-                        first_frame, num_frames, height, width
-                    )
-                else:
-                    image_emb = {}
+#         with torch.no_grad():
+#             if video is not None:
+#                 # prompt
+#                 prompt_emb = self.pipe_VAE.encode_prompt(text)
+#                 # video
+#                 video = video.to(
+#                     dtype=self.pipe_VAE.torch_dtype, device=self.pipe_VAE.device
+#                 )
+#                 latents = self.pipe_VAE.encode_video(video, **self.tiler_kwargs)[0]
+#                 # image
+#                 if "first_frame" in batch:  # [1, 853, 480, 3]
+#                     first_frame = Image.fromarray(batch["first_frame"][0].cpu().numpy())
+#                     _, _, num_frames, height, width = video.shape
+#                     image_emb = self.pipe_VAE.encode_image(
+#                         first_frame, num_frames, height, width
+#                     )
+#                 else:
+#                     image_emb = {}
 
-                batch = {
-                    "latents": latents.unsqueeze(0),
-                    "prompt_emb": prompt_emb,
-                    "image_emb": image_emb,
-                }
+#                 batch = {
+#                     "latents": latents.unsqueeze(0),
+#                     "prompt_emb": prompt_emb,
+#                     "image_emb": image_emb,
+#                 }
 
-        # Data
-        p1 = random.random()
-        p = random.random()
-        if p1 < 0.05:
+#         # Data
+#         p1 = random.random()
+#         p = random.random()
+#         if p1 < 0.05:
 
-            dwpose_data = torch.zeros_like(dwpose_data)
-            random_ref_dwpose_data = torch.zeros_like(random_ref_dwpose_data)
-        latents = batch["latents"].to(self.device)  # [1, 16, 21, 60, 104]
-        prompt_emb = batch[
-            "prompt_emb"
-        ]  # batch["prompt_emb"]["context"]:  [1, 1, 512, 4096]
+#             dwpose_data = torch.zeros_like(dwpose_data)
+#             random_ref_dwpose_data = torch.zeros_like(random_ref_dwpose_data)
+#         latents = batch["latents"].to(self.device)  # [1, 16, 21, 60, 104]
+#         prompt_emb = batch[
+#             "prompt_emb"
+#         ]  # batch["prompt_emb"]["context"]:  [1, 1, 512, 4096]
 
-        prompt_emb["context"] = prompt_emb["context"].to(self.device)
-        image_emb = batch["image_emb"]
-        if "clip_feature" in image_emb:
-            image_emb["clip_feature"] = image_emb["clip_feature"].to(
-                self.device
-            )  # [1, 257, 1280]
-            if p < 0.1:
-                image_emb["clip_feature"] = torch.zeros_like(
-                    image_emb["clip_feature"]
-                )  # [1, 257, 1280]
-        if "y" in image_emb:
+#         prompt_emb["context"] = prompt_emb["context"].to(self.device)
+#         image_emb = batch["image_emb"]
+#         if "clip_feature" in image_emb:
+#             image_emb["clip_feature"] = image_emb["clip_feature"].to(
+#                 self.device
+#             )  # [1, 257, 1280]
+#             if p < 0.1:
+#                 image_emb["clip_feature"] = torch.zeros_like(
+#                     image_emb["clip_feature"]
+#                 )  # [1, 257, 1280]
+#         if "y" in image_emb:
 
-            if p < 0.1:
-                image_emb["y"] = torch.zeros_like(image_emb["y"])
-            image_emb["y"] = (
-                image_emb["y"].to(self.device) + random_ref_dwpose_data
-            )  # [1, 20, 21, 104, 60]
+#             if p < 0.1:
+#                 image_emb["y"] = torch.zeros_like(image_emb["y"])
+#             image_emb["y"] = (
+#                 image_emb["y"].to(self.device) + random_ref_dwpose_data
+#             )  # [1, 20, 21, 104, 60]
 
-        condition = dwpose_data
-        #
-        condition = rearrange(condition, "b c f h w -> b (f h w) c").contiguous()
-        # Loss
-        self.pipe.device = self.device
-        noise = torch.randn_like(latents)
-        timestep_id = torch.randint(0, self.pipe.scheduler.num_train_timesteps, (1,))
-        timestep = self.pipe.scheduler.timesteps[timestep_id].to(
-            dtype=self.pipe.torch_dtype, device=self.pipe.device
-        )
-        extra_input = self.pipe.prepare_extra_input(latents)
-        noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
-        training_target = self.pipe.scheduler.training_target(latents, noise, timestep)
+#         condition = dwpose_data
+#         #
+#         condition = rearrange(condition, "b c f h w -> b (f h w) c").contiguous()
+#         # Loss
+#         self.pipe.device = self.device
+#         noise = torch.randn_like(latents)
+#         timestep_id = torch.randint(0, self.pipe.scheduler.num_train_timesteps, (1,))
+#         timestep = self.pipe.scheduler.timesteps[timestep_id].to(
+#             dtype=self.pipe.torch_dtype, device=self.pipe.device
+#         )
+#         extra_input = self.pipe.prepare_extra_input(latents)
+#         noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
+#         training_target = self.pipe.scheduler.training_target(latents, noise, timestep)
 
-        # Compute loss
-        noise_pred = self.pipe.denoising_model()(
-            noisy_latents,
-            timestep=timestep,
-            **prompt_emb,
-            **extra_input,
-            **image_emb,
-            use_gradient_checkpointing=self.use_gradient_checkpointing,
-            use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload,
-            add_condition=condition,
-        )
-        loss = torch.nn.functional.mse_loss(noise_pred.float(), training_target.float())
-        loss = loss * self.pipe.scheduler.training_weight(timestep)
+#         # Compute loss
+#         noise_pred = self.pipe.denoising_model()(
+#             noisy_latents,
+#             timestep=timestep,
+#             **prompt_emb,
+#             **extra_input,
+#             **image_emb,
+#             use_gradient_checkpointing=self.use_gradient_checkpointing,
+#             use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload,
+#             add_condition=condition,
+#         )
+#         loss = torch.nn.functional.mse_loss(noise_pred.float(), training_target.float())
+#         loss = loss * self.pipe.scheduler.training_weight(timestep)
 
-        # Record log
-        self.log("train_loss", loss, prog_bar=True, logger=True)
-        return loss
+#         # Record log
+#         self.log("train_loss", loss, prog_bar=True, logger=True)
+#         return loss
 
-    def validation_step(self, batch, batch_idx):
-        # batch["dwpose_data"]/255.: [1, 3, 81, 832, 480], batch["random_ref_dwpose_data"]/255.: [1, 832, 480, 3]
-        text, video, path = batch["text"][0], batch["video"], batch["path"][0]
-        # 'A person is dancing',  [1, 3, 81, 832,
-        first_frame = Image.fromarray(batch["first_frame"][0].detach().cpu().numpy())
+#     def validation_step(self, batch, batch_idx):
+#         # batch["dwpose_data"]/255.: [1, 3, 81, 832, 480], batch["random_ref_dwpose_data"]/255.: [1, 832, 480, 3]
+#         text, video, path = batch["text"][0], batch["video"], batch["path"][0]
+#         # 'A person is dancing',  [1, 3, 81, 832,
+#         first_frame = Image.fromarray(batch["first_frame"][0].detach().cpu().numpy())
 
-        video_out_condition = []
-        for ii in range(batch["dwpose_data"][0].shape[1]):
-            ss = Image.fromarray(
-                batch["dwpose_data"][0, :, ii]
-                .permute(1, 2, 0)
-                .detach()
-                .cpu()
-                .numpy()
-                .astype(np.uint8)
-            )
-            video_out_condition.append(
-                image_compose_width(
-                    first_frame,
-                    ss,
-                )
-            )
+#         video_out_condition = []
+#         for ii in range(batch["dwpose_data"][0].shape[1]):
+#             ss = Image.fromarray(
+#                 batch["dwpose_data"][0, :, ii]
+#                 .permute(1, 2, 0)
+#                 .detach()
+#                 .cpu()
+#                 .numpy()
+#                 .astype(np.uint8)
+#             )
+#             video_out_condition.append(
+#                 image_compose_width(
+#                     first_frame,
+#                     ss,
+#                 )
+#             )
 
-        # Image-to-video
-        video = self.pipe(
-            prompt="a person is dancing",
-            negative_prompt="细节模糊不清，字幕，作品，画作，画面，静止，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，杂乱的背景，三条腿，背景人很多，倒着走",
-            input_image=first_frame,
-            num_inference_steps=50,
-            cfg_scale=1.5,  # slow
-            # cfg_scale=1.0, # fast
-            seed=0,
-            tiled=True,
-            dwpose_data=batch["dwpose_data"][0],
-            random_ref_dwpose=batch["random_ref_dwpose_data"][0],
-            height=self.height,
-            width=self.width,
-            tea_cache_l1_thresh=0.3,
-            tea_cache_model_id="Wan2.1-I2V-14B-720P",
-        )
+#         # Image-to-video
+#         video = self.pipe(
+#             prompt="a person is dancing",
+#             negative_prompt="细节模糊不清，字幕，作品，画作，画面，静止，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，杂乱的背景，三条腿，背景人很多，倒着走",
+#             input_image=first_frame,
+#             num_inference_steps=50,
+#             cfg_scale=1.5,  # slow
+#             # cfg_scale=1.0, # fast
+#             seed=0,
+#             tiled=True,
+#             dwpose_data=batch["dwpose_data"][0],
+#             random_ref_dwpose=batch["random_ref_dwpose_data"][0],
+#             height=self.height,
+#             width=self.width,
+#             tea_cache_l1_thresh=0.3,
+#             tea_cache_model_id="Wan2.1-I2V-14B-720P",
+#         )
 
-        video_out = []
-        for ii in range(len(video)):
-            ss = video[ii]
-            video_out.append(image_compose_width(video_out_condition[ii], ss))
-        video_out = np.stack([np.array(ss) for ss in video_out], axis=0)
+#         video_out = []
+#         for ii in range(len(video)):
+#             ss = video[ii]
+#             video_out.append(image_compose_width(video_out_condition[ii], ss))
+#         video_out = np.stack([np.array(ss) for ss in video_out], axis=0)
 
-        tensorboard = self.logger.experiment
-        tensorboard.add_video(
-            "validation/output",
-            np.transpose(video_out, (0, 3, 1, 2))[None],
-            global_step=self.global_step,
-        )
+#         tensorboard = self.logger.experiment
+#         tensorboard.add_video(
+#             "validation/output",
+#             np.transpose(video_out, (0, 3, 1, 2))[None],
+#             global_step=self.global_step,
+#         )
 
-    def configure_optimizers(self):
-        # trainable_modules = filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters())
-        # optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
-        # return optimizer
-        trainable_modules = [
-            {
-                "params": filter(
-                    lambda p: p.requires_grad, self.pipe.denoising_model().parameters()
-                )
-            },
-            {"params": self.dwpose_embedding.parameters()},
-            {"params": self.randomref_embedding_pose.parameters()},
-        ]
-        optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
-        return optimizer
+#     def configure_optimizers(self):
+#         # trainable_modules = filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters())
+#         # optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
+#         # return optimizer
+#         trainable_modules = [
+#             {
+#                 "params": filter(
+#                     lambda p: p.requires_grad, self.pipe.denoising_model().parameters()
+#                 )
+#             },
+#             {"params": self.dwpose_embedding.parameters()},
+#             {"params": self.randomref_embedding_pose.parameters()},
+#         ]
+#         optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
+#         return optimizer
 
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint.clear()
-        # trainable_param_names = list(filter(lambda named_param: named_param[1].requires_grad, self.pipe.denoising_model().named_parameters())) + \
-        #                         list(filter(lambda named_param: named_param[1].requires_grad, self.dwpose_embedding.named_parameters())) + \
-        #                         list(filter(lambda named_param: named_param[1].requires_grad, self.randomref_embedding_pose.named_parameters()))
-        trainable_param_names = list(
-            filter(
-                lambda named_param: named_param[1].requires_grad,
-                self.named_parameters(),
-            )
-        )
+#     def on_save_checkpoint(self, checkpoint):
+#         checkpoint.clear()
+#         # trainable_param_names = list(filter(lambda named_param: named_param[1].requires_grad, self.pipe.denoising_model().named_parameters())) + \
+#         #                         list(filter(lambda named_param: named_param[1].requires_grad, self.dwpose_embedding.named_parameters())) + \
+#         #                         list(filter(lambda named_param: named_param[1].requires_grad, self.randomref_embedding_pose.named_parameters()))
+#         trainable_param_names = list(
+#             filter(
+#                 lambda named_param: named_param[1].requires_grad,
+#                 self.named_parameters(),
+#             )
+#         )
 
-        trainable_param_names = set(
-            [named_param[0] for named_param in trainable_param_names]
-        )
-        # state_dict = self.pipe.denoising_model().state_dict()
-        state_dict = self.state_dict()
-        # state_dict.update()
-        lora_state_dict = {}
-        for name, param in state_dict.items():
-            if name in trainable_param_names:
-                lora_state_dict[name] = param
-        checkpoint.update(lora_state_dict)
+#         trainable_param_names = set(
+#             [named_param[0] for named_param in trainable_param_names]
+#         )
+#         # state_dict = self.pipe.denoising_model().state_dict()
+#         state_dict = self.state_dict()
+#         # state_dict.update()
+#         lora_state_dict = {}
+#         for name, param in state_dict.items():
+#             if name in trainable_param_names:
+#                 lora_state_dict[name] = param
+#         checkpoint.update(lora_state_dict)
 
 
 def parse_args():
@@ -1369,6 +1370,11 @@ def parse_args():
         default=None,
         help="SwanLab mode (cloud or local).",
     )
+    parser.add_argument(
+        "--encode_image_dense",
+        action="store_true",
+        help="Do not add reference poses",
+    )
     args = parser.parse_args()
     return args
 
@@ -1517,6 +1523,7 @@ def train_onestage(args):
         use_gradient_checkpointing_offload=args.use_gradient_checkpointing_offload,
         pretrained_lora_path=args.pretrained_lora_path,
         model_VAE=model_VAE,
+        encode_image_dense=args.encode_image_dense,
     )
     if args.use_swanlab:
         from swanlab.integration.pytorch_lightning import SwanLabLogger

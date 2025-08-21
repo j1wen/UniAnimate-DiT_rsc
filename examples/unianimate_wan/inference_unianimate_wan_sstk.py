@@ -134,8 +134,25 @@ def resize(image):
 random.seed(seed)
 np.random.seed(seed)
 
+shutterstock_video_dataset_v2 = dict(
+    # type="LCAShutterstockVideoTrinityDataset",
+    data_root="/decoders/suzhaoen/legion/lhm/resampled/full_res_images",
+    keypoints_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    smplx_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/smplx_params",  # not used
+    trinity_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",  # used
+    mask_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    index_root="/home/j1wen/rsc/UniAnimate-DiT/data/example_dataset/SSTK350K/val_scenes.txt",
+    frame_list_root="/xrcia_shared/ariyanzarei/filtering/SSTK_350K/results/sstk_350k/final_filtered_indices/valid_frames",
+    # num_source=num_source,
+    # num_target=num_target,
+    # repeat_factor=10,  # 1e5 x 10 = 1e6
+    # black_background=black_background,
+    # face_bbox_aspect_ratio=face_bbox_aspect_ratio,
+    # erode_mask=False,
+)
+
 dataset = SSTKVideoDataset_onestage(
-    **shutterstock_video_dataset,
+    **shutterstock_video_dataset_v2,
     max_num_frames=max_frames,
     frame_interval=1,
     num_frames=max_frames,
