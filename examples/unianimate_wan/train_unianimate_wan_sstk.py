@@ -36,7 +36,7 @@ from torchvision.transforms import v2
 from tqdm import tqdm
 
 from train_util import coco_wholebody2openpose, draw_keypoints
-from examples.unianimate_dit.train_unianimate_wan import LightningModelForTrain_onestage
+from examples.unianimate_wan.train_unianimate_wan import LightningModelForTrain_onestage
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
