@@ -1374,6 +1374,11 @@ def parse_args():
         action="store_true",
         help="Do not add reference poses",
     )
+    parser.add_argument(
+        "--zero_init",
+        action="store_true",
+        help="Do not add reference poses",
+    )
     args = parser.parse_args()
     return args
 
@@ -1524,6 +1529,7 @@ def train_onestage(args):
         pretrained_lora_path=args.pretrained_lora_path,
         model_VAE=model_VAE,
         encode_image_dense=args.encode_image_dense,
+        zero_init=args.zero_init,
     )
     if args.use_swanlab:
         from swanlab.integration.pytorch_lightning import SwanLabLogger

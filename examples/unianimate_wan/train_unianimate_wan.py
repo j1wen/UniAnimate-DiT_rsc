@@ -557,6 +557,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         pretrained_lora_path=None,
         model_VAE=None,
         encode_image_dense=False,
+        zero_init=False,
         #
     ):
         super().__init__()
@@ -625,6 +626,12 @@ class LightningModelForTrain_onestage(pl.LightningModule):
             nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
         )
         self.freeze_parameters()
+
+        if zero_init:
+            self.dwpose_embedding[-1].weight.data.zero_()
+            self.dwpose_embedding[-1].bias.data.zero_()
+            self.randomref_embedding_pose[-1].weight.data.zero_()
+            self.randomref_embedding_pose[-1].bias.data.zero_()
 
         # self.freeze_parameters()
         if train_architecture == "lora":
@@ -820,6 +827,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         prompt_emb = batch[
             "prompt_emb"
         ]  # batch["prompt_emb"]["context"]:  [1, 1, 512, 4096]
+        print(torch.sum(dwpose_data), torch.sum(random_ref_dwpose_data))
 
         prompt_emb["context"] = prompt_emb["context"].to(self.device)
         image_emb = batch["image_emb"]
@@ -1120,6 +1128,11 @@ def parse_args():
     )
     parser.add_argument(
         "--encode_image_dense",
+        action="store_true",
+        help="Do not add reference poses",
+    )
+    parser.add_argument(
+        "--zero_init",
         action="store_true",
         help="Do not add reference poses",
     )
