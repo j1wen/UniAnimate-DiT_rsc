@@ -25,6 +25,7 @@ from diffsynth import (
     WanVideoPipeline,
 )
 from einops import rearrange
+from examples.unianimate_wan.train_unianimate_wan import LightningModelForTrain_onestage
 
 from examples.unianimate_wan.train_util import coco_wholebody2openpose, draw_keypoints
 from peft import inject_adapter_in_model, LoraConfig
@@ -36,7 +37,6 @@ from torchvision.transforms import v2
 from tqdm import tqdm
 
 from train_util import coco_wholebody2openpose, draw_keypoints
-from examples.unianimate_wan.train_unianimate_wan import LightningModelForTrain_onestage
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -1178,7 +1178,6 @@ def parse_args():
         "--dataset_path",
         type=str,
         default=None,
-        required=True,
         help="The path of the Dataset.",
     )
     parser.add_argument(
@@ -1461,7 +1460,8 @@ class LightningModelForDataProcess(pl.LightningModule):
 
 
 def train_onestage(args):
-
+    if args.dataset_path is not None:
+        shutterstock_video_dataset_v2["index_root"] = args.dataset_path
     dataset = SSTKVideoDataset_onestage(
         **shutterstock_video_dataset_v2,
         max_num_frames=args.num_frames,
