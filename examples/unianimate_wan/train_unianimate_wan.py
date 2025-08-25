@@ -827,7 +827,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         prompt_emb = batch[
             "prompt_emb"
         ]  # batch["prompt_emb"]["context"]:  [1, 1, 512, 4096]
-        print(torch.sum(dwpose_data), torch.sum(random_ref_dwpose_data))
+        # print(torch.sum(dwpose_data), torch.sum(random_ref_dwpose_data))
 
         prompt_emb["context"] = prompt_emb["context"].to(self.device)
         image_emb = batch["image_emb"]
