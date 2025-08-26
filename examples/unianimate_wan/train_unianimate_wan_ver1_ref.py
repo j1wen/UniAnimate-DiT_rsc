@@ -425,6 +425,7 @@ class LightningModelForTrain_onestage(pl.LightningModule):
         pretrained_lora_path=None,
         model_VAE=None,
         add_ref_pose=True,
+        zero_init=False,
         #
     ):
         super().__init__()
@@ -495,6 +496,12 @@ class LightningModelForTrain_onestage(pl.LightningModule):
                 nn.Conv2d(concat_dim * 4, randomref_dim, 3, stride=2, padding=1),
             )
         self.freeze_parameters()
+
+        if zero_init:
+            self.dwpose_embedding[-1].weight.data.zero_()
+            self.dwpose_embedding[-1].bias.data.zero_()
+            self.randomref_embedding_pose[-1].weight.data.zero_()
+            self.randomref_embedding_pose[-1].bias.data.zero_()
 
         # self.freeze_parameters()
         if train_architecture == "lora":
