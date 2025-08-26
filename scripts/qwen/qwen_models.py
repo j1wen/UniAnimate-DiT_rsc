@@ -150,36 +150,49 @@ if __name__ == "__main__":
         video_names = [line.strip() for line in f.readlines()]
     image_root = "/decoders/suzhaoen/legion/lhm/resampled/full_res_images"
 
+    done_list = os.listdir("/checkpoint/avatar/j1wen/loose_done_list")
+
     static_video_names = []
     for video_name in tqdm(video_names[int(sys.argv[1]):int(sys.argv[1]) + 10000]):
         print(video_name)
-        video_name_parts = name2parts(video_name)
-        image_dir = os.path.join(image_root, video_name_parts)
+        if video_name in done_list:
+            continue
+        try:
+            video_name_parts = name2parts(video_name)
+            image_dir = os.path.join(image_root, video_name_parts)
 
-        tmp_video_name = f'/home/j1wen/rsc_unsync/temp_{int(sys.argv[1]):06d}.mp4'
+            tmp_video_name = f'/home/j1wen/rsc_unsync/temp_{int(sys.argv[1]):06d}.mp4'
 
-        frame = cv2.imread(os.path.join(image_dir, sorted(os.listdir(image_dir))[0]))
-        height, width, layers = frame.shape
+            frame = cv2.imread(os.path.join(image_dir, sorted(os.listdir(image_dir))[0]))
+            height, width, layers = frame.shape
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video = cv2.VideoWriter(tmp_video_name, fourcc, 30, (width,height))
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video = cv2.VideoWriter(tmp_video_name, fourcc, 30, (width,height))
 
-        common_names = []
-        for file_name in sorted(os.listdir(image_dir)):
-            if file_name.endswith(".jpg") or file_name.endswith(".png"):
-                common_names.append(os.path.join(image_dir, file_name))
-                video.write(cv2.imread(os.path.join(image_dir, file_name)))
-        video.release()
+            common_names = []
+            for file_name in sorted(os.listdir(image_dir)):
+                if file_name.endswith(".jpg") or file_name.endswith(".png"):
+                    common_names.append(os.path.join(image_dir, file_name))
+                    video.write(cv2.imread(os.path.join(image_dir, file_name)))
+            video.release()
 
-        prompt = "Describe the video content in details. Answer Yes or No: is it a video of a person on a pure-color background, e.g., green, black or white?"
-        ans = model.video_query(tmp_video_name, prompt)[0]
-        print(ans)
-        # print(ans)
-        # if "yes" in ans.lower():
-        #     static_video_names.append(video_name)
-        #     shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/static/" + video_name + '.mp4')
-        #     # if len(static_video_names) > 900:
-        #     #     break
+            # prompt = "Describe the video content in details. Answer Yes or No: is it a video of a person on a pure-color background, e.g., green, black or white?"
+            prompt = """Analyze the video and determine if the following conditions are met:
+    1) The person in the video is wearing loose dresses or long coats.
+    2) The person is performing large motions, with particular emphasis on noticeable movements of the feet and legs.
+    Please provide a yes/no answer for each condition along with a brief explanation or evidence from the video frames."""
+            ans = model.video_query(tmp_video_name, prompt)[0]
+            print(ans)
+            # print(ans)
+            if ans.lower().count("yes") >= 2:
+                static_video_names.append(video_name)
+                shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/loose/" + video_name + '.mp4')
+                # if len(static_video_names) > 900:
+                #     break
+            with open(f"/checkpoint/avatar/j1wen/loose_done_list/{video_name}", "w") as f:
+                f.write("")
+        except:
+            print(f"video {video_name} failed")
 
     # local_video_fp = "/home/j1wen/rsc/UniAnimate-DiT/scripts/qwen/lighticon_example.mp4"
     # prompt = "Describe the video content in details. Answer Yes or No in the last word: is it from a static camera?"
