@@ -33,9 +33,9 @@ class Qwen2_5_VL:
             torch_dtype=torch.bfloat16,
             # flash-attn package is out-dated and cannot be used in latest transformers-stack, further version upgrade is needed
             attn_implementation="sdpa",
-            device_map="auto",
+            device_map="cuda",
         ).eval()
-        self.processor = AutoProcessor.from_pretrained(model_dir)
+        self.processor = AutoProcessor.from_pretrained(model_dir, device_map="cuda")
 
     def image_query(
         self,
@@ -101,12 +101,10 @@ class Qwen2_5_VL:
             padding=True,
             return_tensors="pt",
         )
-        # print(inputs)
-        # for key, value in inputs.items():
-        #     try:
-        #         print(key, value.device, flush=True)
-        #     except:
-        #         pass
+        if torch.cuda.device_count() == 1:
+            for key in inputs:
+                if isinstance(inputs[key], torch.Tensor):
+                    inputs[key] = inputs[key].cuda()
         with torch.inference_mode():
             generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
         generated_ids_trimmed = [
@@ -176,11 +174,12 @@ if __name__ == "__main__":
         prompt = "Describe the video content in details. Answer Yes or No: is it a video of a person on a pure-color background, e.g., green, black or white?"
         ans = model.video_query(tmp_video_name, prompt)[0]
         print(ans)
-        if "yes" in ans.lower():
-            static_video_names.append(video_name)
-            shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/static/" + video_name + '.mp4')
-            # if len(static_video_names) > 900:
-            #     break
+        # print(ans)
+        # if "yes" in ans.lower():
+        #     static_video_names.append(video_name)
+        #     shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/static/" + video_name + '.mp4')
+        #     # if len(static_video_names) > 900:
+        #     #     break
 
     # local_video_fp = "/home/j1wen/rsc/UniAnimate-DiT/scripts/qwen/lighticon_example.mp4"
     # prompt = "Describe the video content in details. Answer Yes or No in the last word: is it from a static camera?"
