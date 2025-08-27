@@ -9,6 +9,7 @@ import time
 from functools import lru_cache
 from io import BytesIO
 from typing import Optional
+import numpy as np
 
 import requests
 import torch
@@ -319,43 +320,6 @@ def fetch_video(
                 f"video_reader_backend {video_reader_backend} error, use torchvision as default, msg: {e}"
             )
             video, sample_fps = VIDEO_READER_BACKENDS["torchvision"](ele)
-
-        nframes, _, height, width = video.shape
-        min_pixels = ele.get("min_pixels", VIDEO_MIN_PIXELS)
-        total_pixels = ele.get("total_pixels", VIDEO_TOTAL_PIXELS)
-        max_pixels = max(
-            min(VIDEO_MAX_PIXELS, total_pixels / nframes * FRAME_FACTOR),
-            int(min_pixels * 1.05),
-        )
-        max_pixels_supposed = ele.get("max_pixels", max_pixels)
-        if max_pixels_supposed > max_pixels:
-            logger.warning(
-                f"The given max_pixels[{max_pixels_supposed}] exceeds limit[{max_pixels}]."
-            )
-        max_pixels = min(max_pixels_supposed, max_pixels)
-        if "resized_height" in ele and "resized_width" in ele:
-            resized_height, resized_width = smart_resize(
-                ele["resized_height"],
-                ele["resized_width"],
-                factor=image_factor,
-            )
-        else:
-            resized_height, resized_width = smart_resize(
-                height,
-                width,
-                factor=image_factor,
-                min_pixels=min_pixels,
-                max_pixels=max_pixels,
-            )
-        video = transforms.functional.resize(
-            video,
-            [resized_height, resized_width],
-            interpolation=InterpolationMode.BICUBIC,
-            antialias=True,
-        ).float()
-        if return_video_sample_fps:
-            return video, sample_fps
-        return video
     else:
         assert isinstance(ele["video"], (list, tuple))
         process_info = ele.copy()
@@ -363,18 +327,52 @@ def fetch_video(
         process_info.pop("video", None)
         process_info["min_pixels"] = VIDEO_MIN_PIXELS
         process_info["max_pixels"] = VIDEO_MAX_PIXELS
-        images = [
-            fetch_image(
-                {"image": video_element, **process_info}, size_factor=image_factor
-            )
-            for video_element in ele["video"]
-        ]
-        nframes = ceil_by_factor(len(images), FRAME_FACTOR)
-        if len(images) < nframes:
-            images.extend([images[-1]] * (nframes - len(images)))
-        if return_video_sample_fps:
-            return images, process_info.pop("fps", 2.0)
-        return images
+
+        total_frames = len(ele["video"])
+        video_fps = 30
+        nframes = smart_nframes(ele, total_frames=total_frames, video_fps=video_fps)
+        idx = torch.linspace(0, total_frames - 1, nframes).round().long().tolist()
+
+        images = [np.array(Image.open(ele["video"][i])) for i in idx]
+        video = torch.tensor(np.stack(images)).permute(0, 3, 1, 2)
+        sample_fps = nframes / max(total_frames, 1e-6) * video_fps
+
+    nframes, _, height, width = video.shape
+    min_pixels = ele.get("min_pixels", VIDEO_MIN_PIXELS)
+    total_pixels = ele.get("total_pixels", VIDEO_TOTAL_PIXELS)
+    max_pixels = max(
+        min(VIDEO_MAX_PIXELS, total_pixels / nframes * FRAME_FACTOR),
+        int(min_pixels * 1.05),
+    )
+    max_pixels_supposed = ele.get("max_pixels", max_pixels)
+    if max_pixels_supposed > max_pixels:
+        logger.warning(
+            f"The given max_pixels[{max_pixels_supposed}] exceeds limit[{max_pixels}]."
+        )
+    max_pixels = min(max_pixels_supposed, max_pixels)
+    if "resized_height" in ele and "resized_width" in ele:
+        resized_height, resized_width = smart_resize(
+            ele["resized_height"],
+            ele["resized_width"],
+            factor=image_factor,
+        )
+    else:
+        resized_height, resized_width = smart_resize(
+            height,
+            width,
+            factor=image_factor,
+            min_pixels=min_pixels,
+            max_pixels=max_pixels,
+        )
+    video = transforms.functional.resize(
+        video,
+        [resized_height, resized_width],
+        interpolation=InterpolationMode.BICUBIC,
+        antialias=True,
+    ).float()
+    if return_video_sample_fps:
+        return video, sample_fps
+    return video
 
 
 def extract_vision_info(conversations: list[dict] | list[list[dict]]) -> list[dict]:
