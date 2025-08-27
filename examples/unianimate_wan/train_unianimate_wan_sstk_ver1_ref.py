@@ -6,6 +6,7 @@ import glob
 import pickle
 import random
 import sys
+import pandas as pd
 
 import cv2
 
@@ -37,6 +38,20 @@ from torchvision.transforms import v2
 from tqdm import tqdm
 
 from train_util import coco_wholebody2openpose, draw_keypoints
+
+sys.path.append("/xrcia_shared/marcopesavento/latent_diffusion")
+sys.path.append("/xrcia_shared/junxuanli/Colosuss/hyperportrait_code")
+sys.path.append("/xrcia_shared/marcopesavento/ava_rsc_datasets")
+sys.path.insert(0, "/xrcia_shared/marcopesavento/sstk_processing_new")
+from spdl_video_pipeline import (  # pyre-ignore
+    dict_iterator_over_df,  # pyre-ignore
+    map_samples_to_airstore_samples,  # pyre-ignore
+    MaxSizeUncompressedVideoFilterConfig,  # pyre-ignore
+    MinShortestEdgeVideoFilterConfig,  # pyre-ignore
+    spdl_video_pipeline,  # pyre-ignore
+    SPDLVideoPipelineConfig,  # pyre-ignore
+    VideoDatasetConfig,  # pyre-ignore
+)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -103,6 +118,25 @@ shutterstock_video_dataset_v2 = dict(
     mask_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
     index_root="/home/j1wen/rsc/UniAnimate-DiT/data/example_dataset/SSTK350K/train_scenes.txt",
     frame_list_root="/xrcia_shared/ariyanzarei/filtering/SSTK_350K/results/sstk_350k/final_filtered_indices/valid_frames",
+    # num_source=num_source,
+    # num_target=num_target,
+    # repeat_factor=10,  # 1e5 x 10 = 1e6
+    # black_background=black_background,
+    # face_bbox_aspect_ratio=face_bbox_aspect_ratio,
+    # erode_mask=False,
+)
+
+
+shutterstock_video_dataset_v3 = dict(
+    # type="LCAShutterstockVideoTrinityDataset",
+    data_root="/decoders/suzhaoen/legion/lhm/resampled/full_res_images",
+    keypoints_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    smplx_root="/decoders/junxuanli/legion/lhm/resampled/full_res_images/smplx_params",  # not used
+    trinity_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",  # used
+    mask_root="/decoders/matthewhu/itw_body_tracking_ls/delivery/sstk_350k/outputs",
+    index_root=None,
+    frame_list_root="/xrcia_shared/ariyanzarei/filtering/SSTK_350K/results/sstk_350k/final_filtered_indices/valid_frames",
+    info_root = "/xrcia_shared/marcopesavento/itw_body_fitting/sstk_v1_final/evaluation/valid_videos_8frames_train.parquet",
     # num_source=num_source,
     # num_target=num_target,
     # repeat_factor=10,  # 1e5 x 10 = 1e6
@@ -761,7 +795,7 @@ class SSTKVideoDataset_onestage(torch.utils.data.Dataset):
         return len(self.video_names_valid)
 
 
-class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
+class SSTKV3VideoDataset_onestage(torch.utils.data.Dataset):
     def __init__(
         self,
         data_root,
@@ -771,6 +805,7 @@ class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
         mask_root,
         index_root,
         frame_list_root,
+        info_root,
         max_num_frames=80,
         frame_interval=2,
         num_frames=80,
@@ -790,9 +825,19 @@ class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
         self.keypoints_root = keypoints_root
         self.index_root = index_root
         self.frame_list_root = frame_list_root
+        self.info_root = info_root
         self.num_source = 1
         self.num_target = num_frames
         self.load_face = load_face
+
+        self.airstore_info = {
+            "airstore_table_name": "codec_avatar_shutterstock_video_people_v01_full_res_no_user_data",
+            "blobstore_bucket": "avatar",
+            "input_blobstore_root": "/sstk/video/k344_s51_i90942-p_s1.0_ct_ps_pr-1k_ds_2_4-3po-blur-all/yuan_20250801",
+            "output_ttl_days": None,
+            "airstore_blobstore_unique_key": "unique_id",
+            "airstore_video_bytes_key": "image",
+        }
 
         self.data_list = self.load_data_list()
 
@@ -838,6 +883,8 @@ class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
     def load_data_list(self):
         data_list = []
 
+        self.df_all = pd.read_parquet(self.info_root)
+
         self.rgb_dir = self.data_root
         self.mask_dir = (
             os.path.join(self.data_root, "mask")
@@ -860,7 +907,9 @@ class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
 
         video_names = []
 
-        if self.index_dir.endswith(".txt") or self.index_dir.endswith(".csv"):
+        if self.index_root is None:
+            video_names = self.df_all['unique_id'].tolist()
+        elif self.index_dir.endswith(".txt") or self.index_dir.endswith(".csv"):
             with open(self.index_dir, "r") as f:
                 lines = f.readlines()
             for line in lines:
@@ -934,6 +983,57 @@ class SSTKV2VideoDataset_onestage(torch.utils.data.Dataset):
         ) = args
 
         video_name_parts = self.name2parts(video_name)
+
+        selected_dfs = self.df_all[self.df_all["unique_id"] == video_name]
+        df = selected_dfs.iloc[[0]]
+        # just sending the first one to get the full video
+        df.to_parquet(f"tmp/parquest_tmp_{video_name}.parquet", index=False)
+
+        pipeline_config = SPDLVideoPipelineConfig(
+            # num_threads=self.config.dataloader_config.num_threads,
+            # video_download_concurrency=self.config.dataloader_config.video_download_concurrency,
+            # blobstore_download_concurrency=self.config.dataloader_config.blobstore_download_concurrency,
+            # video_parsing_concurrency=self.config.dataloader_config.video_parsing_concurrency,
+            # keypoints_parsing_concurrency=self.config.dataloader_config.keypoints_parsing_concurrency,
+            # segmentation_parsing_concurrency=self.config.dataloader_config.segmentation_parsing_concurrency,
+            load_videos=True,
+            load_keypoints=True,
+            load_segmentations=True,
+            # Downsample videos / segmentations to 512 on the smallest axes
+            min_size=None,
+        )
+        dataset_config = VideoDatasetConfig(
+            airstore_table_name=self.airstore_info["airstore_table_name"],
+            airstore_blobstore_unique_key=self.airstore_info["airstore_blobstore_unique_key"],
+            airstore_video_bytes_key=self.airstore_info["airstore_video_bytes_key"],
+            blobstore_bucket=self.airstore_info["blobstore_bucket"],
+            blobstore_asset_root=self.airstore_info["input_blobstore_root"],
+        )
+        pipeline_kpts_seg = spdl_video_pipeline(
+            row_iterable=dict_iterator_over_df(
+                map_samples_to_airstore_samples(
+                    f"tmp/parquest_tmp_{video_name}.parquet",
+                    dataset_config,
+                    rank=0,
+                    world_size=1,
+                    filter_configs=[
+                        MaxSizeUncompressedVideoFilterConfig(
+                            max_size_uncompressed_bytes=int(50 * 1e9)
+                        ),
+                        MinShortestEdgeVideoFilterConfig(540, inclusive=True),
+                    ]
+                )
+            ),
+            dataset_config=dataset_config,
+            pipeline_config=pipeline_config,
+        )
+
+        with pipeline_kpts_seg.auto_stop():
+            for raw_data in pipeline_kpts_seg:
+                images_list = raw_data["frames"]
+                raw_kpts_dict = raw_data["raw_kpts"]
+                segmentation_list = raw_data["segmentation"]
+                timestamps_list = raw_data["timestamp_ms"]
 
         # Define subdirectories for the video
         image_dir = os.path.join(rgb_dir, video_name_parts)
@@ -2094,8 +2194,8 @@ class LightningModelForDataProcess(pl.LightningModule):
 
 def train_onestage(args):
 
-    dataset = SSTKVideoDataset_onestage(
-        **shutterstock_video_dataset_v2,
+    dataset = SSTKV3VideoDataset_onestage(
+        **shutterstock_video_dataset_v3,
         max_num_frames=args.num_frames,
         frame_interval=1,
         num_frames=args.num_frames,
