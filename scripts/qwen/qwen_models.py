@@ -150,7 +150,7 @@ if __name__ == "__main__":
         video_names = [line.strip() for line in f.readlines()]
     image_root = "/decoders/suzhaoen/legion/lhm/resampled/full_res_images"
 
-    done_list = os.listdir("/checkpoint/avatar/j1wen/loose_done_list")
+    done_list = os.listdir("/checkpoint/avatar/j1wen/loose_static_done_list")
 
     static_video_names = []
     for video_name in tqdm(video_names[int(sys.argv[1]):int(sys.argv[1]) + 10000]):
@@ -180,16 +180,18 @@ if __name__ == "__main__":
             prompt = """Analyze the video and determine if the following conditions are met:
     1) The person in the video is wearing loose dresses or long coats.
     2) The person is performing large motions, with particular emphasis on noticeable movements of the feet and legs.
-    Please provide a yes/no answer for each condition along with a brief explanation or evidence from the video frames."""
+    Please provide a yes/no answer for each condition along with a brief explanation or evidence from the video frames.
+    3) The background of the video is a pure color, such as black, white, green, or another solid color without patterns or complex textures.
+    """
             ans = model.video_query(tmp_video_name, prompt)[0]
             print(ans)
             # print(ans)
-            if ans.lower().count("yes") >= 2:
+            if ans.lower().count("yes") >= 3:
                 static_video_names.append(video_name)
-                shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/loose/" + video_name + '.mp4')
+                shutil.copyfile(tmp_video_name, "/checkpoint/avatar/j1wen/loose_static/" + video_name + '.mp4')
                 # if len(static_video_names) > 900:
                 #     break
-            with open(f"/checkpoint/avatar/j1wen/loose_done_list/{video_name}", "w") as f:
+            with open(f"/checkpoint/avatar/j1wen/loose_static_done_list/{video_name}", "w") as f:
                 f.write("")
         except:
             print(f"video {video_name} failed")
