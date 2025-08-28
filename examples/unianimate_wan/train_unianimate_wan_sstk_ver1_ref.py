@@ -987,15 +987,15 @@ class SSTKV3VideoDataset_onestage(torch.utils.data.Dataset):
         selected_dfs = self.df_all[self.df_all["unique_id"] == video_name]
         df = selected_dfs.iloc[[0]]
         # just sending the first one to get the full video
-        df.to_parquet(f"tmp/parquest_tmp_{video_name}.parquet", index=False)
+        df.to_parquet(f"/checkpoint/avatar/j1wen/tmp/parquest_tmp_{video_name}.parquet", index=False)
 
         pipeline_config = SPDLVideoPipelineConfig(
-            # num_threads=self.config.dataloader_config.num_threads,
-            # video_download_concurrency=self.config.dataloader_config.video_download_concurrency,
-            # blobstore_download_concurrency=self.config.dataloader_config.blobstore_download_concurrency,
-            # video_parsing_concurrency=self.config.dataloader_config.video_parsing_concurrency,
-            # keypoints_parsing_concurrency=self.config.dataloader_config.keypoints_parsing_concurrency,
-            # segmentation_parsing_concurrency=self.config.dataloader_config.segmentation_parsing_concurrency,
+            num_threads=48,
+            video_download_concurrency=1,
+            blobstore_download_concurrency=1,
+            video_parsing_concurrency=1,
+            keypoints_parsing_concurrency=1,
+            segmentation_parsing_concurrency=1,
             load_videos=True,
             load_keypoints=True,
             load_segmentations=True,
@@ -1012,7 +1012,7 @@ class SSTKV3VideoDataset_onestage(torch.utils.data.Dataset):
         pipeline_kpts_seg = spdl_video_pipeline(
             row_iterable=dict_iterator_over_df(
                 map_samples_to_airstore_samples(
-                    f"tmp/parquest_tmp_{video_name}.parquet",
+                    f"/checkpoint/avatar/j1wen/tmp/parquest_tmp_{video_name}.parquet",
                     dataset_config,
                     rank=0,
                     world_size=1,
